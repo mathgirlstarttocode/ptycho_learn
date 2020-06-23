@@ -29,7 +29,7 @@ img0 = loadmat('gold.mat')['img0']
 
 ############################
 
-def main(img0,nframes,nx,ny,nnx,nny,Dx,Dy):
+def main():
     #generate truth
     truth=cropmat(img0,[Nx,Ny])
     
@@ -80,7 +80,7 @@ def main(img0,nframes,nx,ny,nnx,nny,Dx,Dy):
 
 #call main()
     
-truth,img,img1,img2=main(img0,nframes,nx,ny,nnx,nny,Dx,Dy)
+truth,img,img1,img2=main()
 
 #plot
 
