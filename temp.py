@@ -63,7 +63,7 @@ def main():
     frames_norm=np.linalg.norm(frames,axis=(1,2))
     D=sp.sparse.diags(1/frames_norm)
     H1=D @ H @ D
-    H1=(H1+np.transpose(H1))/2
+    H1=(H1+H1.getH())/2
 
     #compute the largest eigenvalue of H
     v0=sp.ones((nframes,1))
