@@ -37,11 +37,11 @@ def make_probe(nx,ny):
     
     
 def make_translations(Dx,Dy,nnx,nny,Nx,Ny):
-    ix,iy=np.meshgrid(np.arange(0,Dx*nnx,Dx)+Nx/2-Dx*nnx/2,
-                      np.arange(0,Dy*nny,Dy)+Ny/2-Dy*nny/2)
+    ix,iy=np.meshgrid(np.arange(0,Dx*nnx,Dx)+Nx/2-Dx*nnx/2+1,
+                      np.arange(0,Dy*nny,Dy)+Ny/2-Dy*nny/2+1)
     xshift=math.floor(Dx/2)*np.mod(np.arange(1,np.size(ix,1)+1),2)
     ix=np.transpose(np.add(np.transpose(ix),xshift))
-    
+    #+1 to account for counting
     return ix,iy
     
 
@@ -57,16 +57,14 @@ def map_frames(translations_x,translations_y,nx,ny,Nx,Ny):
     
     mapidx=np.mod(spv_x,Nx)
     mapidy=np.mod(spv_y,Ny)
-    mapid=np.add(mapidx*Nx,mapidy) 
-    # I found out the error was with here, maybe because python was counting rowwise.
-    #now it gives almost exact recon
+    mapid=np.add(mapidx,mapidy*Nx) 
     mapid=mapid.astype(int)
     return mapidx,mapidy,mapid
     
     
-def Split(img,col,row):
-    Split=img[row,col]         
-    return Split
+#def Split(img,col,row):
+#    Split=img[row,col]         
+#    return Split
 
 def Splitc(img,mapid):
     return (img.ravel())[mapid]
@@ -137,7 +135,7 @@ def Gramiam(nframes,framesl,framesr,col,row,nx,ny,dx,dy):
 
     H=sp.sparse.csr_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))
     
-    H=H+np.transpose(sp.sparse.triu(H,1))
+    H=H+(sp.sparse.triu(H,1)).getH()
     
     return H
     

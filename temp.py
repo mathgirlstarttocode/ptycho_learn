@@ -3,6 +3,7 @@ import numpy as np
 import scipy as sp
 from scipy.sparse.linalg import eigsh
 import math
+from scipy.sparse.linalg import eigsh
 import matplotlib.pyplot as plt
 from Operators import cropmat, make_probe, make_translations, map_frames, Overlapc,Illuminate_frames, frames_overlap,Replicate_frame, Splitc, Stack_frames,Gramiam
 
@@ -49,10 +50,11 @@ def main():
    
     #randomize framewise phases
     phases=np.exp(1j*np.random.random((nframes,1))*2*math.pi)
-    stv_rand=Stack_frames(frames,phases)
-    img1=Overlap(Illuminate_frames(stv_rand,np.conj(illumination)))/normalization
+    frames_rand=Stack_frames(frames,phases)
+    img1=Overlap(Illuminate_frames(frames_rand,np.conj(illumination)))/normalization
    
     #Phase synchronization
+    frames=frames_rand
     framesl=Illuminate_frames(frames,np.conj(illumination))
     framesr=np.divide(framesl,normalization[mapidy.astype(int),mapidx.astype(int)])
     
@@ -65,7 +67,7 @@ def main():
     H1=D @ H @ D
     H1=(H1+H1.getH())/2
 
-    #compute the largest eigenvalue of H
+    #compute the largest eigenvalue of H1
     v0=sp.ones((nframes,1))
     eigenvalues, eigenvectors = eigsh(H1, k=2,which='LM',v0=v0)
     #if dont specify starting point v0, converges to another eigenvector
@@ -84,19 +86,19 @@ truth,img,img1,img2=main()
 
 #plot
 
-fig, axs = plt.subplots(nrows=4, sharex=True,figsize=(20,20))
+fig, axs = plt.subplots(nrows=2, ncols=2, sharex=True,figsize=(10,10))
 
-axs[0].set_title('Truth')
-axs[0].imshow(abs(truth))
+axs[0,0].set_title('Truth')
+axs[0,0].imshow(abs(truth))
 
-axs[1].set_title('Recovered')
-axs[1].imshow(abs(img))
+axs[0,1].set_title('Recovered')
+axs[0,1].imshow(abs(img))
 
-axs[2].set_title('Random phase, No Sync')
-axs[2].imshow(abs(img1))
+axs[1,0].set_title('Random phase, No Sync')
+axs[1,0].imshow(abs(img1))
 
-axs[3].set_title('Random phase with Sync')
-axs[3].imshow(abs(img2))
+axs[1,1].set_title('Random phase with Sync')
+axs[1,1].imshow(abs(img2))
 
 plt.show()
 
