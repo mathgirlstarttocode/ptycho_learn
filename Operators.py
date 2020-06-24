@@ -68,7 +68,7 @@ def map_frames(translations_x,translations_y,nx,ny,Nx,Ny):
     mapidy=np.mod(spv_y,Ny)
     mapid=np.add(mapidx,mapidy*Nx) 
     mapid=mapid.astype(int)
-    return mapidx,mapidy,mapid
+    return mapid
     
     
 #def Split(img,col,row):
@@ -186,9 +186,10 @@ def Eigensolver(H):
     return omega
 
 
-def synchronize_frames_c(frames, illumination, normalization,translations_x,translations_y,nframes,nx,ny,Nx,Ny):
+#def synchronize_frames_c(frames, illumination, normalization,translations_x,translations_y,nframes,nx,ny,Nx,Ny):
+def synchronize_frames_c(frames, illumination, normalization,Gramiam):
     #col,row,dx,dy=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
-    Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
+    # Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
 
         
     framesl=Illuminate_frames(frames,np.conj(illumination))
@@ -213,5 +214,34 @@ def mse_calc(img0,img1):
     mse=np.linalg.norm(img0-img1*phase)
     return mse
 
+def Propagate(frames):
+    # simple propagation
+    return np.fft.fft2(frames)
 
+def IPropagate(frames):
+    # simple inverse propagation
+    return np.fft.ifft2(frames)
 
+eps = 1e-8
+def Project_data(frames,frames_data):
+    # apply Fourier magnitude projections
+    frames = Propagate(frames)
+    frames *= np.sqrt((frames_data+eps)/(np.abs(frames)**2+eps))
+    frames = IPropagate(frames)
+    return frames
+    
+def Alternating_projections(img, frames_data, illumination, normalization, Overlap, Split, maxiter=10):
+    
+    # get the frames from the inital image
+    frames = Illuminate_frames(Split(img),illumination)
+    
+    for ii in np.arange(maxiter):
+        # data projection
+        frames = Project_data(frames,frames_data)
+        ####################
+        # here goes the synchronization
+        ##################
+        # overlap projection
+        img= Overlap(Illuminate_frames(frames,np.conj(illumination)))/normalization
+        frames = Illuminate_frames(Split(img),illumination)
+    return img, frames
