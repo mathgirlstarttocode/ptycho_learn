@@ -12,7 +12,7 @@ from Operators import synchronize_frames_c
 
 #from Operators import Project_data
 
-from Operators import Alternating_projections
+from Operators import Alternating_projections_c
 from Operators import mse_calc
 
 
@@ -86,48 +86,26 @@ if True:
     
     # simulate data
     
-    frames_data = np.abs(np.fft.fft2(frames))**2
+    frames_data = np.abs(np.fft.fft2(frames))**2 #squared magnitude from the truth
     # initial guess of all ones
-    img3 = np.ones(np.shape(img))
-    #img3 = truth #np.ones(np.shape(img))
+    img_initial = np.ones(np.shape(img))
     
-    img3,frames = Alternating_projections(img3, frames_data, illumination, normalization, Overlap, Split, maxiter=100)
+    #img3 calculated using AP without phase sync
+    Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter)
+    img3,frames = Alternating_projections(False,img_initial,maxiter=100)
     
-    # frames= Illuminate_frames(Split(img3), illumination)
-        
-    # maxiter=10
-    # for ii in np.arange(maxiter):
-    #     frames = Project_data(frames,frames_data)
-    #     img3= Overlap(Illuminate_frames(frames,np.conj(illumination)))/normalization
-    #     frames = Illuminate_frames(Split(img3),illumination)
-
-    #for ii=np.arange(maxiter):
-        
-    
-#    return truth,img,img1,img2
+    #img4 calculated using AP with phase sync
+    img4,frames = Alternating_projections(True,img_initial,maxiter=100)
 
 
-#call main()
-# truth,img,img1,img2=main()
-
-
-# def mse_calc(img0,img1):
-#     # calculate the MSE after global phase correction
-#     nnz=np.size(img0)
-#     # compute the best phase
-#     phase=np.dot(np.reshape(np.conj(img1),(1,nnz)),np.reshape(img0,(nnz,1)))[0,0]
-#     phase=phase/np.abs(phase)
-#     # compute mse
-#     mse=np.linalg.norm(img0-img1*phase)
-#     return mse
-
-
+#calculate mse
 nrm0=np.linalg.norm(truth)
 #nmse0=np.linalg.norm(truth-img)/nrm0
 nmse0=mse_calc(truth,img)/nrm0
 nmse1=mse_calc(truth,img1)/nrm0
 nmse2=mse_calc(truth,img2)/nrm0
 nmse3=mse_calc(truth,img3)/nrm0
+nmse4=mse_calc(truth,img4)/nrm0
 
 
 
@@ -138,23 +116,23 @@ nmse3=mse_calc(truth,img3)/nrm0
 
 fig, axs = plt.subplots(nrows=2, ncols=3, sharex=True,figsize=(10,10))
 
-axs[0,0].set_title('Truth')
+axs[0,0].set_title('Truth',fontsize=10)
 axs[0,0].imshow(abs(truth))
 
-axs[0,1].set_title('True frames, nmse:%2.2g' % (nmse0))
+axs[0,1].set_title('True frames, nmse:%2.2g' % (nmse0),fontsize=10)
 axs[0,1].imshow(abs(img))
 
-axs[1,0].set_title('Random phase, No Sync:%2.2g' %( nmse1))
+axs[1,0].set_title('Random phase, No Sync:%2.2g' %( nmse1),fontsize=10)
 axs[1,0].imshow(abs(img1))
 
-axs[1,1].set_title('Random phase with Sync:%2.2g' %( nmse2))
+axs[1,1].set_title('Random phase with Sync:%2.2g' %( nmse2),fontsize=10)
 axs[1,1].imshow(abs(img2))
 
-axs[0,2].set_title('Alternating Projections:%2.2g' %( nmse3))
+axs[0,2].set_title('Alternating Projections:%2.2g' %( nmse3),fontsize=10)
 axs[0,2].imshow(abs(img3))
 
-axs[1,2].set_title('empty:%2.2g' %( np.infty))
-axs[1,2].imshow(abs(truth*0))
+axs[1,2].set_title('Alternating Projections with Sync:%2.2g' %( nmse4),fontsize=10)
+axs[1,2].imshow(abs(img4))
 
 plt.show()
 

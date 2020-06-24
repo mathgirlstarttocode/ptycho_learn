@@ -204,6 +204,11 @@ def synchronize_frames_c(frames, illumination, normalization,Gramiam):
     omega=Eigensolver(H1)
     return omega
 
+#def synchronize_frames_plan(inormalization_split,Gramiam):
+#    omega=lambda frames synchronize_frames_c(frames, illumination, inormalization_split, Gramiam)
+#    Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,nframes,col,row,nx,ny,dx,dy)
+#    return Gramiam
+
 def mse_calc(img0,img1):
     # calculate the MSE between two images after global phase correction
     nnz=np.size(img0)
@@ -230,18 +235,25 @@ def Project_data(frames,frames_data):
     frames = IPropagate(frames)
     return frames
     
-def Alternating_projections(img, frames_data, illumination, normalization, Overlap, Split, maxiter=10):
+def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter):
     
     # get the frames from the inital image
     frames = Illuminate_frames(Split(img),illumination)
+    inormalization_split = Split(1/normalization)
     
     for ii in np.arange(maxiter):
         # data projection
         frames = Project_data(frames,frames_data)
         ####################
         # here goes the synchronization
+        if opt==True:
+            omega=synchronize_frames_c(frames, illumination, inormalization_split, Gramiam)
+            frames=frames*omega
         ##################
         # overlap projection
         img= Overlap(Illuminate_frames(frames,np.conj(illumination)))/normalization
         frames = Illuminate_frames(Split(img),illumination)
     return img, frames
+
+    
+    
