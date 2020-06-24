@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import scipy as sp
-from scipy.sparse.linalg import eigsh
-import math
-from scipy.sparse.linalg import eigsh
+#import scipy as sp
+#import math
+#from scipy.sparse.linalg import eigsh
 import matplotlib.pyplot as plt
-from Operators import cropmat, make_probe, make_translations, map_frames, Overlapc,Illuminate_frames, frames_overlap,Replicate_frame, Splitc, Stack_frames,Gramiam
+from Operators import cropmat, make_probe, make_translations, map_frames
+from Operators import Overlapc, Illuminate_frames,  Replicate_frame, Splitc #, frames_overlap, Stack_frames
+#from Operators import Gramiam, Eigensolver, Precondition
+from Operators import synchronize_frames_c
+
 
 
 
@@ -37,67 +40,83 @@ def main():
     #generate benchmark
     illumination=make_probe(nx,ny)
     translations_x,translations_y=make_translations(Dx,Dy,nnx,nny,Nx,Ny)
-
+    
+    print('translations shape',np.shape(translations_x))
+    # make plan for Overlap and Split    
     mapidx,mapidy,mapid=map_frames(translations_x,translations_y,nx,ny,Nx,Ny)  
-
     Overlap = lambda frames: Overlapc(frames,Nx,Ny,mapid)
     Split = lambda img: Splitc(img,mapid)
-
-    frames=Illuminate_frames(Split(truth),illumination) #check
-    normalization=Overlap(Replicate_frame(np.abs(illumination)**2,nframes)) #check
     
+    # generate normalization
+    normalization=Overlap(Replicate_frame(np.abs(illumination)**2,nframes)) #check
+    # generate frames
+    frames=Illuminate_frames(Split(truth),illumination) #check
+
+    # recover the image 
     img=Overlap(Illuminate_frames(frames,np.conj(illumination)))/normalization
    
     #randomize framewise phases
-    phases=np.exp(1j*np.random.random((nframes,1))*2*math.pi)
-    frames_rand=Stack_frames(frames,phases)
+    phases=np.exp(1j*np.random.random((nframes,1,1))*2*np.pi)
+    frames_rand=frames*phases
     img1=Overlap(Illuminate_frames(frames_rand,np.conj(illumination)))/normalization
    
     #Phase synchronization
     frames=frames_rand
-    framesl=Illuminate_frames(frames,np.conj(illumination))
-    framesr=np.divide(framesl,normalization[mapidy.astype(int),mapidx.astype(int)])
+    #omega = synch_frames(frames, illumination, normalization)
+
+    inormalization_split = Split(1/normalization)
     
-    col,row,dx,dy=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
-    H=Gramiam(nframes,framesl,framesr,col,row,nx,ny,dx,dy)
-
-    #preconditioner 
-    frames_norm=np.linalg.norm(frames,axis=(1,2))
-    D=sp.sparse.diags(1/frames_norm)
-    H1=D @ H @ D
-    H1=(H1+H1.getH())/2
-
-    #compute the largest eigenvalue of H1
-    v0=sp.ones((nframes,1))
-    eigenvalues, eigenvectors = eigsh(H1, k=2,which='LM',v0=v0)
-    #if dont specify starting point v0, converges to another eigenvector
-    omega=eigenvectors[:,0]
-    omega=omega/np.abs(omega)
+    omega=synchronize_frames_c(frames, illumination, inormalization_split,translations_x,translations_y,nframes,nx,ny,Nx,Ny)
     
     #synchronize frames
-    stv_sync=Stack_frames(frames,omega)
-    img2=Overlap(Illuminate_frames(stv_sync,np.conj(illumination)))/normalization
+    frames_sync=frames*omega
+
+    img2=Overlap(Illuminate_frames(frames_sync,np.conj(illumination)))/normalization
     
     return truth,img,img1,img2
 
+
 #call main()
-    
 truth,img,img1,img2=main()
 
-#plot
+from Operators import mse_calc
+
+# def mse_calc(img0,img1):
+#     # calculate the MSE after global phase correction
+#     nnz=np.size(img0)
+#     # compute the best phase
+#     phase=np.dot(np.reshape(np.conj(img1),(1,nnz)),np.reshape(img0,(nnz,1)))[0,0]
+#     phase=phase/np.abs(phase)
+#     # compute mse
+#     mse=np.linalg.norm(img0-img1*phase)
+#     return mse
+
+
+nrm0=np.linalg.norm(truth)
+#nmse0=np.linalg.norm(truth-img)/nrm0
+nmse0=mse_calc(truth,img)/nrm0
+nmse1=mse_calc(truth,img1)/nrm0
+nmse2=mse_calc(truth,img2)/nrm0
+
+
+
+#phase2=np.dot(np.reshape(img2,(1,np.size(img1))),np.reshape(truth,(np.size(img1),1)))[0,0]
+
+#print("nmse",nmse0,nmse1,nmse2)
+
 
 fig, axs = plt.subplots(nrows=2, ncols=2, sharex=True,figsize=(10,10))
 
 axs[0,0].set_title('Truth')
 axs[0,0].imshow(abs(truth))
 
-axs[0,1].set_title('Recovered')
+axs[0,1].set_title('Recovered, nmse:%2.2g' % (nmse0))
 axs[0,1].imshow(abs(img))
 
-axs[1,0].set_title('Random phase, No Sync')
+axs[1,0].set_title('Random phase, No Sync:%2.2g' %( nmse1))
 axs[1,0].imshow(abs(img1))
 
-axs[1,1].set_title('Random phase with Sync')
+axs[1,1].set_title('Random phase with Sync:%2.2g' %( nmse2))
 axs[1,1].imshow(abs(img2))
 
 plt.show()
