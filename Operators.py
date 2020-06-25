@@ -231,19 +231,34 @@ eps = 1e-8
 def Project_data(frames,frames_data):
     # apply Fourier magnitude projections
     frames = Propagate(frames)
+    mse = np.linalg.norm(np.abs(frames)-np.sqrt(frames_data))
+
     frames *= np.sqrt((frames_data+eps)/(np.abs(frames)**2+eps))
     frames = IPropagate(frames)
-    return frames
+    return frames, mse
     
-def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter):
+def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth = None):
+    
+    # we need the frames norm to normalize
+    frames_norm = np.linalg.norm(np.sqrt(frames_data))
+    # renormalize the norm for the ifft2 space
+    frames_norm_r= frames_norm/np.sqrt(np.prod(frames_data.shape[-2:]))
+    
     
     # get the frames from the inital image
     frames = Illuminate_frames(Split(img),illumination)
     inormalization_split = Split(1/normalization)
     
+    residuals = np.zeros((maxiter,3))
+    if type(img_truth) != type(None):
+        nrm_truth = np.linalg.norm(img_truth)
+        
     for ii in np.arange(maxiter):
         # data projection
-        frames = Project_data(frames,frames_data)
+        frames, mse_data = Project_data(frames,frames_data)
+        residuals[ii,1] = mse_data/frames_norm
+        
+        frames_old =frames+0. # make a copy
         ####################
         # here goes the synchronization
         if opt==True:
@@ -252,8 +267,17 @@ def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normali
         ##################
         # overlap projection
         img= Overlap(Illuminate_frames(frames,np.conj(illumination)))/normalization
+        
         frames = Illuminate_frames(Split(img),illumination)
-    return img, frames
+
+        residuals[ii,2] = np.linalg.norm(frames-frames_old)/frames_norm_r
+        
+
+        if type(img_truth) != type(None):
+            nmse0=mse_calc(img_truth,img)/nrm_truth
+            residuals[ii,0] = nmse0
+        
+    return img, frames, residuals
 
     
     

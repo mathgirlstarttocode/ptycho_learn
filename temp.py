@@ -91,11 +91,11 @@ if True:
     img_initial = np.ones(np.shape(img))
     
     #img3 calculated using AP without phase sync
-    Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter)
-    img3,frames = Alternating_projections(False,img_initial,maxiter=100)
+    Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth=truth)
+    img3,frames, residuals_nosync = Alternating_projections(False,img_initial,maxiter=100)
     
     #img4 calculated using AP with phase sync
-    img4,frames = Alternating_projections(True,img_initial,maxiter=100)
+    img4,frames, residuals_wsync = Alternating_projections(True,img_initial,maxiter=100)
 
 
 #calculate mse
@@ -135,4 +135,23 @@ axs[1,2].set_title('Alternating Projections with Sync:%2.2g' %( nmse4),fontsize=
 axs[1,2].imshow(abs(img4))
 
 plt.show()
+
+##
+# make a new figure with residuals
+fig, axs = plt.subplots(nrows=3, ncols=1, sharex=True,figsize=(10,10))
+# fig=plt.figure()
+axs[0].semilogy(residuals_nosync[:,0])
+axs[0].semilogy(residuals_wsync[:,0])
+axs[0].legend(['nosync', 'sync'])
+axs[0].set_title('img-truth')
+axs[1].semilogy(residuals_nosync[:,1])
+axs[1].semilogy(residuals_wsync[:,1])
+axs[1].legend(['nosync', 'sync'])
+#axs[1].title('frames-data')
+axs[1].set_title('frames-data')
+
+axs[2].semilogy(residuals_nosync[:,2])
+axs[2].semilogy(residuals_wsync[:,2])
+axs[2].legend(['nosync', 'sync'])
+axs[2].set_title('frames overlapped')
 
