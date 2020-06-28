@@ -7,13 +7,15 @@ import matplotlib.pyplot as plt
 from Operators import cropmat, make_probe, make_translations, map_frames
 from Operators import Overlapc, Illuminate_frames,  Replicate_frame, Splitc #, frames_overlap, Stack_frames
 #from Operators import Gramiam, Eigensolver, Precondition
-from Operators import Gramiam_plan, Gramiam_calc
+from Operators import Gramiam_plan
 from Operators import synchronize_frames_c
 
 #from Operators import Project_data
 
-from Operators import Alternating_projections_c
+#from Operators import Alternating_projections_c
 from Operators import mse_calc
+
+from Solvers import Alternating_projections_c
 
 
 
