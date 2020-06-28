@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from Operators import cropmat, make_probe, make_translations, map_frames
 from Operators import Overlapc, Illuminate_frames,  Replicate_frame, Splitc #, frames_overlap, Stack_frames
 #from Operators import Gramiam, Eigensolver, Precondition
-from Operators import Gramiam_plan
+from Operators import Gramiam_plan, Gramiam_calc
 from Operators import synchronize_frames_c
 
 #from Operators import Project_data
@@ -55,7 +55,10 @@ if True:
     
     Overlap = lambda frames: Overlapc(frames,Nx,Ny,mapid)
     Split = lambda img: Splitc(img,mapid)
-    Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
+    #Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
+    bw=0
+    Gplan = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw)
+    # Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,plan)
     
     # generate normalization
     normalization=Overlap(Replicate_frame(np.abs(illumination)**2,nframes)) #check
@@ -77,7 +80,7 @@ if True:
     inormalization_split = Split(1/normalization)
     
     #omega=synchronize_frames_c(frames, illumination, inormalization_split,translations_x,translations_y,nframes,nx,ny,Nx,Ny)
-    omega=synchronize_frames_c(frames_rand, illumination, inormalization_split, Gramiam)
+    omega=synchronize_frames_c(frames_rand, illumination, inormalization_split, Gplan)
     
     #synchronize frames
     frames_sync=frames_rand*omega
@@ -91,7 +94,7 @@ if True:
     img_initial = np.ones(np.shape(img))
     
     #img3 calculated using AP without phase sync
-    Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth=truth)
+    Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gplan,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth=truth)
     img3,frames, residuals_nosync = Alternating_projections(False,img_initial,maxiter=100)
     
     #img4 calculated using AP with phase sync

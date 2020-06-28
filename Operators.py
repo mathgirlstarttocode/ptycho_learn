@@ -7,6 +7,8 @@ import scipy as sp
 import math
 import numpy_groupies
 
+from timeit import default_timer as timer
+
 
 def crop_center(img, cropx, cropy):
     # crop an image
@@ -104,7 +106,7 @@ def Stack_frames(frames,omega):
     stv=frames*omega
     return stv
 
-def frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny):
+def frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw=0):
     # find the col,row, and shifts dx,dy for each pair of frames that overlap
     
     #calculates the difference of the coordinates between all frames
@@ -118,36 +120,58 @@ def frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny):
     dy=-(dy+Ny*((dy < (-Ny/2)).astype(float)-(dy > (Ny/2)).astype(float)))    
  
     #find the frames idex that overlaps
-    col,row=np.where(np.tril(np.logical_and(abs(dy)< nx,abs(dx) < ny)).T)
-    
-    return col,row,dx,dy
+    #col,row=np.where(np.tril(np.logical_and(abs(dy)< nx,abs(dx) < ny)).T)
+    col,row=np.where(np.tril((abs(dy)< nx-2*bw)*(abs(dx) < ny-2*bw)).T)
+    # complex displacement (x, 1j y)
+    dd = dx[row,col]+1j*dy[row,col]
 
-def ket(ystackr,ii,jj,nx,ny,dx,dy): 
+    return col,row,dd
+
+def ket(ystackr,dx,dy,bw=0): 
     #extracts the portion of the left frame that overlaps
-    dx=dx.astype(int)
-    dy=dy.astype(int)
-    ket=ystackr[ii,max([0,dy[ii,jj]]):min([nx,nx+dy[ii,jj]]),
-                max([0,dx[ii,jj]]):min([nx,nx+dx[ii,jj]])]
+    #dxi=dx[ii,jj].astype(int)
+    #dyi=dy[ii,jj].astype(int)
+    nx,ny = ystackr.shape
+    dxi=dx.astype(int)
+    dyi=dy.astype(int)
+    ket=ystackr[max([0,dyi])+bw:min([nx,nx+dyi])-bw,
+                max([0,dxi])+bw:min([nx,nx+dxi])-bw]
     return ket
 
-def bra(ystackl,ii,jj,nx,ny,dx,dy):
+def bra(ystackl,dx,dy,bw=0):
     #calculates the portion of the right frame that overlaps
-    bra=np.conj(ket(ystackl,jj,ii,nx,ny,dx,dy))
+    bra=ket(ystackl,dx,dy,bw)
     return bra
 
-def bracket(ystackl,ystackr,ii,jj,nx,ny,dx,dy):
+def bracket(ystackl,ystackr,dd,bw):
     #calculates inner products between the overlapping portion
-    bracket=np.sum(np.multiply(bra(ystackl,ii,jj,nx,ny,dx,dy),ket(ystackr,ii,jj,nx,ny,dx,dy)))
+#    dxi=dx[ii,jj]
+#    dyi=dy[ii,jj]
+    dxi=dd.real
+    dyi=dd.imag
+    
+    #bracket=np.sum(np.multiply(bra(ystackl[jj],nx,ny,-dxi,-dyi),ket(ystackr[ii],nx,ny,dxi,dyi)))
+    #bracket=np.vdot(bra(ystackl[jj],nx,ny,-dxi,-dyi),ket(ystackr[ii],nx,ny,dxi,dyi))
+    bracket=np.vdot(bra(ystackl,-dxi,-dyi,bw),ket(ystackr,dxi,dyi,bw))
+    
+    
     return bracket
 
-def Gramiam_calc(framesl,framesr,nframes,col,row,nx,ny,dx,dy):
+#def Gramiam_calc(framesl,framesr,col,row,dd, bw=0):
+def Gramiam_calc(framesl,framesr,plan):
     # computes all the inner products between overlaping frames
-   
+    col=plan['col']
+    row=plan['row']
+    dd=plan['dd']
+    bw=plan['bw']
+
+    nframes=framesl.shape[0]
     nnz=len(col)
     val=np.zeros((nnz,1),dtype='complex128')
+    #nx,ny=framesl.shape[1:]
     
-    for ii in range(nnz):
-        val[ii]=bracket(framesl,framesr,row[ii],col[ii],nx,ny,dx,dy)
+    for ii in range(nnz):         
+        val[ii]=bracket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
 
     H=sp.sparse.csr_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))
     
@@ -155,18 +179,23 @@ def Gramiam_calc(framesl,framesr,nframes,col,row,nx,ny,dx,dy):
     
     return H
 
-def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny):
+def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw =0):
     # embed all geometric parameters into the gramiam function
-    col,row,dx,dy=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
-    Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,nframes,col,row,nx,ny,dx,dy)
-    return Gramiam
+    col,row,dd=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny, bw)
+    
+    plan={'col':col,'row':row,'dd':dd, 'bw':bw}
+    #Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,plan)
+    return  plan
+    
+    
 
 #    lambda Gramiam1
 #    H=Gramiam(nframes,framesl,framesr,col,row,nx,ny,dx,dy)
 
 
-def Precondition(H,frames):
-    frames_norm=np.linalg.norm(frames,axis=(1,2))
+def Precondition(H,frames, bw = 0):
+    fw,fh=frames.shape[1:]
+    frames_norm=np.linalg.norm(frames[:,bw:fw-bw ,bw:fh-bw],axis=(1,2))
     D=sp.sparse.diags(1/frames_norm)
     H1=D @ H @ D
     H1=(H1+H1.getH())/2
@@ -182,22 +211,29 @@ def Eigensolver(H):
     #if dont specify starting point v0, converges to another eigenvector
     omega=eigenvectors[:,0]
     omega=omega/np.abs(omega)
+    
+    # subtract the average phase
+    so=np.conj(np.sum(omega))
+    so/=abs(so)    
+    omega*=so
+    ########
+    
     omega=np.reshape(omega,(nframes,1,1))
     return omega
 
 
 #def synchronize_frames_c(frames, illumination, normalization,translations_x,translations_y,nframes,nx,ny,Nx,Ny):
-def synchronize_frames_c(frames, illumination, normalization,Gramiam):
+def synchronize_frames_c(frames, illumination, normalization,plan, bw=0):
     #col,row,dx,dy=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
     # Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
 
         
     framesl=Illuminate_frames(frames,np.conj(illumination))
     framesr=framesl*normalization    
-    H=Gramiam(framesl,framesr)
+    H=Gramiam_calc(framesl,framesr,plan)
 
     #preconditioner 
-    H1, D = Precondition(H,frames)
+    H1, D = Precondition(H,frames,bw)
 
     
     #compute the largest eigenvalue of H1    
@@ -237,6 +273,8 @@ def Project_data(frames,frames_data):
     frames = IPropagate(frames)
     return frames, mse
     
+
+
 def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth = None):
     
     # we need the frames norm to normalize
@@ -248,6 +286,8 @@ def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normali
     # get the frames from the inital image
     frames = Illuminate_frames(Split(img),illumination)
     inormalization_split = Split(1/normalization)
+    time_sync = 0 
+
     
     residuals = np.zeros((maxiter,3))
     if type(img_truth) != type(None):
@@ -262,8 +302,11 @@ def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normali
         ####################
         # here goes the synchronization
         if opt==True:
+            time0 = timer()
             omega=synchronize_frames_c(frames, illumination, inormalization_split, Gramiam)
             frames=frames*omega
+            time_sync += timer()-time0
+
         ##################
         # overlap projection
         img= Overlap(Illuminate_frames(frames,np.conj(illumination)))/normalization
@@ -277,6 +320,7 @@ def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normali
             nmse0=mse_calc(img_truth,img)/nrm_truth
             residuals[ii,0] = nmse0
         
+    print('time sync:',time_sync)
     return img, frames, residuals
 
     
