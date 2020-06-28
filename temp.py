@@ -56,7 +56,7 @@ if True:
     Overlap = lambda frames: Overlapc(frames,Nx,Ny,mapid)
     Split = lambda img: Splitc(img,mapid)
     #Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
-    bw=0
+    bw=3
     Gplan = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw)
     # Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,plan)
     
