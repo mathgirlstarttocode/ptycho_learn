@@ -8,7 +8,10 @@ import math
 import numpy_groupies
 
 from timeit import default_timer as timer
+timers={'Gramiam':0, 'Eigensolver':0}
 
+def get_times():
+    return timers
 
 def crop_center(img, cropx, cropy):
     # crop an image
@@ -106,26 +109,6 @@ def Stack_frames(frames,omega):
     stv=frames*omega
     return stv
 
-def frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw=0):
-    # find the col,row, and shifts dx,dy for each pair of frames that overlap
-    
-    #calculates the difference of the coordinates between all frames
-    dx=translations_x.ravel(order='F').reshape(nframes,1)
-    dy=translations_y.ravel(order='F').reshape(nframes,1)
-    dx=np.subtract(dx,np.transpose(dx))
-    dy=np.subtract(dy,np.transpose(dy))
-    
-    #calculates the wrapping effect for a period boundary
-    dx=-(dx+Nx*((dx < (-Nx/2)).astype(float)-(dx > (Nx/2)).astype(float)))
-    dy=-(dy+Ny*((dy < (-Ny/2)).astype(float)-(dy > (Ny/2)).astype(float)))    
- 
-    #find the frames idex that overlaps
-    #col,row=np.where(np.tril(np.logical_and(abs(dy)< nx,abs(dx) < ny)).T)
-    col,row=np.where(np.tril((abs(dy)< nx-2*bw)*(abs(dx) < ny-2*bw)).T)
-    # complex displacement (x, 1j y)
-    dd = dx[row,col]+1j*dy[row,col]
-
-    return col,row,dd
 
 def ket(ystackr,dx,dy,bw=0): 
     #extracts the portion of the left frame that overlaps
@@ -143,7 +126,7 @@ def bra(ystackl,dx,dy,bw=0):
     bra=ket(ystackl,dx,dy,bw)
     return bra
 
-def bracket(ystackl,ystackr,dd,bw):
+def braket(ystackl,ystackr,dd,bw):
     #calculates inner products between the overlapping portion
 #    dxi=dx[ii,jj]
 #    dyi=dy[ii,jj]
@@ -152,13 +135,14 @@ def bracket(ystackl,ystackr,dd,bw):
     
     #bracket=np.sum(np.multiply(bra(ystackl[jj],nx,ny,-dxi,-dyi),ket(ystackr[ii],nx,ny,dxi,dyi)))
     #bracket=np.vdot(bra(ystackl[jj],nx,ny,-dxi,-dyi),ket(ystackr[ii],nx,ny,dxi,dyi))
-    bracket=np.vdot(bra(ystackl,-dxi,-dyi,bw),ket(ystackr,dxi,dyi,bw))
+    bket=np.vdot(bra(ystackl,-dxi,-dyi,bw),ket(ystackr,dxi,dyi,bw))
     
     
-    return bracket
+    return bket
+
 
 #def Gramiam_calc(framesl,framesr,col,row,dd, bw=0):
-def Gramiam_calc(framesl,framesr,plan):
+def Gramiam_calc0(framesl,framesr,plan):
     # computes all the inner products between overlaping frames
     col=plan['col']
     row=plan['row']
@@ -168,10 +152,9 @@ def Gramiam_calc(framesl,framesr,plan):
     nframes=framesl.shape[0]
     nnz=len(col)
     val=np.zeros((nnz,1),dtype='complex128')
-    #nx,ny=framesl.shape[1:]
-    
+        
     for ii in range(nnz):         
-        val[ii]=bracket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
+        val[ii]=braket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
 
     H=sp.sparse.csr_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))
     
@@ -179,11 +162,62 @@ def Gramiam_calc(framesl,framesr,plan):
     
     return H
 
+#from multiprocessing import Process
+import multiprocessing as mp
+
+def Gramiam_calc(framesl,framesr,plan):
+    # computes all the inner products between overlaping frames
+    col=plan['col']
+    row=plan['row']
+    dd=plan['dd']
+    bw=plan['bw']
+    val=plan['val']
+    
+    nframes=framesl.shape[0]
+    nnz=len(col)
+    #val=np.empty((nnz,1),dtype=framesl.dtype)
+    #val = shared_array(shape=(nnz),dtype=np.complex128)
+ 
+    def braket_i(ii):
+        val[ii] = braket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
+    
+    #val=np.array(list(map(proc1, range(nnz))))
+    for ii in range(nnz):
+        braket_i(ii)
+    
+    
+    H=sp.sparse.csr_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))
+    
+    H=H+(sp.sparse.triu(H,1)).getH()
+    
+    return H
+
+
 def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw =0):
     # embed all geometric parameters into the gramiam function
-    col,row,dd=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny, bw)
+    #calculates the difference of the coordinates between all frames
+    dx=translations_x.ravel(order='F').reshape(nframes,1)
+    dy=translations_y.ravel(order='F').reshape(nframes,1)
+    dx=np.subtract(dx,np.transpose(dx))
+    dy=np.subtract(dy,np.transpose(dy))
     
-    plan={'col':col,'row':row,'dd':dd, 'bw':bw}
+    #calculates the wrapping effect for a period boundary
+    dx=-(dx+Nx*((dx < (-Nx/2)).astype(float)-(dx > (Nx/2)).astype(float)))
+    dy=-(dy+Ny*((dy < (-Ny/2)).astype(float)-(dy > (Ny/2)).astype(float)))    
+ 
+    #find the frames idex that overlaps
+    #col,row=np.where(np.tril(np.logical_and(abs(dy)< nx,abs(dx) < ny)).T)
+    col,row=np.where(np.tril((abs(dy)< nx-2*bw)*(abs(dx) < ny-2*bw)).T)
+    # complex displacement (x, 1j y)
+    dd = dx[row,col]+1j*dy[row,col]
+
+    #col,row,dd=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny, bw)
+ 
+    nnz=col.size
+#    val=np.empty((nnz,1),dtype=np.complex128)
+    val = shared_array(shape=(nnz,1),dtype=np.complex128)
+    
+    plan={'col':col,'row':row,'dd':dd, 'val':val,'bw':bw}
     #Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,plan)
     return  plan
     
@@ -323,5 +357,24 @@ def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normali
     print('time sync:',time_sync)
     return img, frames, residuals
 
-    
-    
+
+import ctypes
+from multiprocessing import sharedctypes
+def shared_array(shape=(1,), dtype=np.float32):  
+    np_type_to_ctype = {np.float32: ctypes.c_float,
+                        np.float64: ctypes.c_double,
+                        np.bool: ctypes.c_bool,
+                        np.uint8: ctypes.c_ubyte,
+                        np.uint64: ctypes.c_ulonglong,
+                        np.complex128: ctypes.c_double,
+                        np.complex64: ctypes.c_float}
+
+    numel = np.int(np.prod(shape))
+    iscomplex=(dtype == np.complex128 or dtype == np.complex64)
+    #numel *= 
+    arr_ctypes = sharedctypes.RawArray(np_type_to_ctype[dtype], numel*(1+iscomplex))
+    np_arr = np.frombuffer(arr_ctypes, dtype=dtype, count=numel)
+    np_arr.shape = shape
+
+    return np_arr     
+        
