@@ -9,6 +9,9 @@ from Operators import Overlapc, Illuminate_frames,  Replicate_frame, Splitc #, f
 #from Operators import Gramiam, Eigensolver, Precondition
 from Operators import Gramiam_plan
 from Operators import synchronize_frames_c
+from Operators import get_times, reset_times
+
+reset_times()
 
 #from Operators import Project_data
 
@@ -22,10 +25,13 @@ from Solvers import Alternating_projections_c
 
 
 # define x dimensions (frames, step, image)
-nx=16 # frame size
+nx=32 # frame size
 Dx=5 # Step size
 nnx=8 # number of frames in x direction
 Nx = Dx*nnx
+bw=13 # cropping border width
+#bw=0 # cropping border width
+
 
 # same thing for y
 ny=nx 
@@ -58,7 +64,6 @@ if True:
     Overlap = lambda frames: Overlapc(frames,Nx,Ny,mapid)
     Split = lambda img: Splitc(img,mapid)
     #Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
-    bw=3
     Gplan = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw)
     # Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,plan)
     
@@ -80,7 +85,12 @@ if True:
     #omega = synch_frames(frames, illumination, normalization)
 
     inormalization_split = Split(1/normalization)
-    
+
+    frames_norm=np.linalg.norm(frames,axis=(1,2))
+
+    import scipy as sp
+    #Gplan['Preconditioner']=sp.sparse.diags(1/frames_norm)
+
     #omega=synchronize_frames_c(frames, illumination, inormalization_split,translations_x,translations_y,nframes,nx,ny,Nx,Ny)
     omega=synchronize_frames_c(frames_rand, illumination, inormalization_split, Gplan)
     
@@ -92,6 +102,12 @@ if True:
     # simulate data
     
     frames_data = np.abs(np.fft.fft2(frames))**2 #squared magnitude from the truth
+
+    # precompute the preconditioner
+    frames_norm=np.sqrt(np.sum(frames_data,axis=(1,2)))/np.sqrt(nx*ny) # norm (fft-rescaled)
+    Gplan['Preconditioner']=sp.sparse.diags(1/frames_norm)
+
+
     # initial guess of all ones
     img_initial = np.ones(np.shape(img))
     
@@ -99,8 +115,10 @@ if True:
     Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gplan,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth=truth)
     img3,frames, residuals_nosync = Alternating_projections(False,img_initial,maxiter=100)
     
+    reset_times()
     #img4 calculated using AP with phase sync
     img4,frames, residuals_wsync = Alternating_projections(True,img_initial,maxiter=100)
+    get_times()
 
 
 #calculate mse

@@ -7,11 +7,18 @@ import scipy as sp
 import math
 import numpy_groupies
 
+#import multiprocessing as mp
+
+# timers
 from timeit import default_timer as timer
-timers={'Gramiam':0, 'Eigensolver':0}
+timers={'Gramiam':0, 'Gramiam_completion':0, 'Precondition':0,
+        'Eigensolver':0, 'Sync_setup':0, 'Overlap':0, 'Project_data':0}
 
 def get_times():
     return timers
+def reset_times():
+    for keys in timers: timers[keys]=0
+
 
 def crop_center(img, cropx, cropy):
     # crop an image
@@ -72,6 +79,7 @@ def map_frames(translations_x,translations_y,nx,ny,Nx,Ny):
     mapidx=np.mod(spv_x,Nx)
     mapidy=np.mod(spv_y,Ny)
     mapid=np.add(mapidx,mapidy*Nx) 
+    #mapid=np.add(mapidx*Nx,mapidy) 
     mapid=mapid.astype(int)
     return mapid
     
@@ -86,7 +94,9 @@ def Splitc(img,mapid):
 
 def Overlapc(frames,Nx,Ny, mapid): #check
     # overlap frames onto an image
+    time0=timer()
     accum = np.reshape(numpy_groupies.aggregate(mapid.ravel(),frames.ravel()),(Nx,Ny))
+    timers['Overlap']+=timer()-time0
     return accum
 
 def Illuminate_frames(frames,Illumination):
@@ -119,6 +129,9 @@ def ket(ystackr,dx,dy,bw=0):
     dyi=dy.astype(int)
     ket=ystackr[max([0,dyi])+bw:min([nx,nx+dyi])-bw,
                 max([0,dxi])+bw:min([nx,nx+dxi])-bw]
+    # ket=ystackr[max([0,dxi])+bw:min([nx,nx+dxi])-bw,
+    #             max([0,dyi])+bw:min([nx,nx+dyi])-bw]
+
     return ket
 
 def bra(ystackl,dx,dy,bw=0):
@@ -141,29 +154,8 @@ def braket(ystackl,ystackr,dd,bw):
     return bket
 
 
-#def Gramiam_calc(framesl,framesr,col,row,dd, bw=0):
-def Gramiam_calc0(framesl,framesr,plan):
-    # computes all the inner products between overlaping frames
-    col=plan['col']
-    row=plan['row']
-    dd=plan['dd']
-    bw=plan['bw']
-
-    nframes=framesl.shape[0]
-    nnz=len(col)
-    val=np.zeros((nnz,1),dtype='complex128')
-        
-    for ii in range(nnz):         
-        val[ii]=braket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
-
-    H=sp.sparse.csr_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))
-    
-    H=H+(sp.sparse.triu(H,1)).getH()
-    
-    return H
 
 #from multiprocessing import Process
-import multiprocessing as mp
 
 def Gramiam_calc(framesl,framesr,plan):
     # computes all the inner products between overlaping frames
@@ -180,15 +172,20 @@ def Gramiam_calc(framesl,framesr,plan):
  
     def braket_i(ii):
         val[ii] = braket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
+    #def proc1(ii):
+    #    return braket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
     
-    #val=np.array(list(map(proc1, range(nnz))))
+    time0=timer()        
     for ii in range(nnz):
         braket_i(ii)
-    
-    
-    H=sp.sparse.csr_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))
-    
+    timers['Gramiam']+=timer()-time0
+    time0=timer()
+        
+    #H=sp.sparse.csr_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))
+    H=sp.sparse.coo_matrix((val.ravel(), (col, row)), shape=(nframes,nframes))    
     H=H+(sp.sparse.triu(H,1)).getH()
+    H=H.tocsr()
+    timers['Gramiam_completion']+=timer()-time0
     
     return H
 
@@ -208,7 +205,9 @@ def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw =0):
     #find the frames idex that overlaps
     #col,row=np.where(np.tril(np.logical_and(abs(dy)< nx,abs(dx) < ny)).T)
     col,row=np.where(np.tril((abs(dy)< nx-2*bw)*(abs(dx) < ny-2*bw)).T)
+
     # complex displacement (x, 1j y)
+    # why are col-row swapped?
     dd = dx[row,col]+1j*dy[row,col]
 
     #col,row,dd=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny, bw)
@@ -228,22 +227,29 @@ def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw =0):
 
 
 def Precondition(H,frames, bw = 0):
+    time0=timer()
     fw,fh=frames.shape[1:]
     frames_norm=np.linalg.norm(frames[:,bw:fw-bw ,bw:fh-bw],axis=(1,2))
     D=sp.sparse.diags(1/frames_norm)
     H1=D @ H @ D
-    H1=(H1+H1.getH())/2
+    #H1=(H1+H1.getH())/2
+    timers['Precondition']+=timer()-time0
     return H1, D
 
     
 from scipy.sparse.linalg import eigsh
 def Eigensolver(H):
+    time0=timer()
+    
     nframes=np.shape(H)[0]
     #print('nframes',nframes)
     v0=np.ones((nframes,1))
-    eigenvalues, eigenvectors = eigsh(H, k=2,which='LM',v0=v0)
+    eigenvalues, eigenvectors = eigsh(H, k=1,which='LM',v0=v0, tol=1e-8)
+    #eigenvalues, eigenvectors = eigsh(H, k=2,which='LM',v0=v0)
     #if dont specify starting point v0, converges to another eigenvector
     omega=eigenvectors[:,0]
+    timers['Eigensolver']+=timer()-time0
+
     omega=omega/np.abs(omega)
     
     # subtract the average phase
@@ -261,13 +267,21 @@ def synchronize_frames_c(frames, illumination, normalization,plan, bw=0):
     #col,row,dx,dy=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
     # Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
 
-        
+    time0=timer()   
     framesl=Illuminate_frames(frames,np.conj(illumination))
     framesr=framesl*normalization    
-    H=Gramiam_calc(framesl,framesr,plan)
+    timers['Sync_setup']+=timer()-time0
 
-    #preconditioner 
-    H1, D = Precondition(H,frames,bw)
+    H=Gramiam_calc(framesl,framesr,plan)
+    
+    if 'Preconditioner' in plan: 
+        time0=timer()
+        #print('hello')
+        D = plan['Preconditioner']
+        H1 = D @ H @ D
+        timers['Precondition']=timer()-time0
+    else:
+        H1, D = Precondition(H,frames,bw)
 
     
     #compute the largest eigenvalue of H1    
@@ -299,63 +313,17 @@ def IPropagate(frames):
 
 eps = 1e-8
 def Project_data(frames,frames_data):
+    time0=timer()
     # apply Fourier magnitude projections
     frames = Propagate(frames)
     mse = np.linalg.norm(np.abs(frames)-np.sqrt(frames_data))
 
     frames *= np.sqrt((frames_data+eps)/(np.abs(frames)**2+eps))
     frames = IPropagate(frames)
+    timers['Project_data']+=timer()-time0
     return frames, mse
     
 
-
-def Alternating_projections_c(opt,img,Gramiam,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth = None):
-    
-    # we need the frames norm to normalize
-    frames_norm = np.linalg.norm(np.sqrt(frames_data))
-    # renormalize the norm for the ifft2 space
-    frames_norm_r= frames_norm/np.sqrt(np.prod(frames_data.shape[-2:]))
-    
-    
-    # get the frames from the inital image
-    frames = Illuminate_frames(Split(img),illumination)
-    inormalization_split = Split(1/normalization)
-    time_sync = 0 
-
-    
-    residuals = np.zeros((maxiter,3))
-    if type(img_truth) != type(None):
-        nrm_truth = np.linalg.norm(img_truth)
-        
-    for ii in np.arange(maxiter):
-        # data projection
-        frames, mse_data = Project_data(frames,frames_data)
-        residuals[ii,1] = mse_data/frames_norm
-        
-        frames_old =frames+0. # make a copy
-        ####################
-        # here goes the synchronization
-        if opt==True:
-            time0 = timer()
-            omega=synchronize_frames_c(frames, illumination, inormalization_split, Gramiam)
-            frames=frames*omega
-            time_sync += timer()-time0
-
-        ##################
-        # overlap projection
-        img= Overlap(Illuminate_frames(frames,np.conj(illumination)))/normalization
-        
-        frames = Illuminate_frames(Split(img),illumination)
-
-        residuals[ii,2] = np.linalg.norm(frames-frames_old)/frames_norm_r
-        
-
-        if type(img_truth) != type(None):
-            nmse0=mse_calc(img_truth,img)/nrm_truth
-            residuals[ii,0] = nmse0
-        
-    print('time sync:',time_sync)
-    return img, frames, residuals
 
 
 import ctypes
