@@ -244,7 +244,7 @@ def Eigensolver(H):
     nframes=np.shape(H)[0]
     #print('nframes',nframes)
     v0=np.ones((nframes,1))
-    eigenvalues, eigenvectors = eigsh(H, k=1,which='LM',v0=v0, tol=1e-8)
+    eigenvalues, eigenvectors = eigsh(H, k=1,which='LM',v0=v0, tol=1e-9)
     #eigenvalues, eigenvectors = eigsh(H, k=2,which='LM',v0=v0)
     #if dont specify starting point v0, converges to another eigenvector
     omega=eigenvectors[:,0]

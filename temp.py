@@ -29,8 +29,8 @@ nx=32 # frame size
 Dx=5 # Step size
 nnx=8 # number of frames in x direction
 Nx = Dx*nnx
-bw=13 # cropping border width
-#bw=0 # cropping border width
+bw=0 #13 # cropping border width
+bw=12 # cropping border width
 
 
 # same thing for y
@@ -118,7 +118,8 @@ if True:
     reset_times()
     #img4 calculated using AP with phase sync
     img4,frames, residuals_wsync = Alternating_projections(True,img_initial,maxiter=100)
-    get_times()
+    timers=get_times()
+    print(timers)
 
 
 #calculate mse
