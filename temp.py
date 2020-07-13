@@ -9,7 +9,7 @@ from Operators import Overlapc, Illuminate_frames,  Replicate_frame, Splitc #, f
 #from Operators import Gramiam, Eigensolver, Precondition
 from Operators import Gramiam_plan
 from Operators import synchronize_frames_c
-from Operators import make_tiles, map_tiles, group_frames,overlap_tiles_c,split_tiles_c,flatten
+from Operators import make_tiles, map_tiles, group_frames,overlap_tiles_c,split_tiles_c,flatten,Tiles_plan,Sync_tiles_c
 from Operators import get_times, reset_times
 reset_times()
 
@@ -19,7 +19,7 @@ reset_times()
 #from Operators import Alternating_projections_c
 from Operators import mse_calc
 
-from Solvers import Alternating_projections_c
+from Solvers import Alternating_projections_c,Alternating_projections_tiles_c
 
 
 
@@ -28,21 +28,24 @@ from Solvers import Alternating_projections_c
 # define x dimensions (frames, step, image)
 nx=16 # frame size
 Dx=5 # Step size
-nnx=8 # number of frames in x direction
+nnx=16 # number of frames in x direction
 Nx = Dx*nnx
 #Nx=256
-bw=0 # cropping border width
-NTx=nnx//3 #number of tiles in x direction
+bw1=3 # cropping border width 
+bw2=0 #cropping border width for sync tile-wise
+NTx=nnx//7 #number of tiles in x direction
 
 # same thing for y
 ny=nx 
-nny=nnx;
-Dy=Dx;
-nframes=nnx*nny; #total number of frames
+nny=nnx
+Dy=Dx
+nframes=nnx*nny #total number of frames
 Ny = Dy*nny
 #Ny=256
 NTy=NTx
 Ntiles=NTx*NTy
+
+maxiter=100
 #############################3
 
 #load image
@@ -68,7 +71,7 @@ if True:
     Overlap = lambda frames: Overlapc(frames,Nx,Ny,mapid)
     Split = lambda img: Splitc(img,mapid)
     
-    Gplan = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw)
+    Gplan = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw1)
     # Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,plan)
     
     # generate frames
@@ -90,7 +93,7 @@ if True:
     frames_norm=np.linalg.norm(frames,axis=(1,2))
 
     import scipy as sp
-    #Gplan['Preconditioner']=sp.sparse.diags(1/frames_norm)
+    Gplan['Preconditioner']=sp.sparse.diags(1/frames_norm)
     omega=synchronize_frames_c(frames_rand, illumination, inormalization_split, Gplan)
     frames_sync=frames_rand*omega
     img2=Overlap(Illuminate_frames(frames_sync,np.conj(illumination)))/normalization
@@ -102,14 +105,6 @@ if True:
     shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy) #calculate divide point of image
     #coordinates of each tile
     translations_tx,translations_ty=np.meshgrid(shift_Tx[0:-1],shift_Ty[0:-1]) 
-    
-    #size of each tile
-    #n_tx=np.repeat(translations_tx,NTy-1,axis=0).ravel()
-    #n_ty=np.repeat(translations_ty,NTx-1,axis=1).ravel()
-    #n_tx=np.minimum(translations_tx+nx,np.repeat(Nx,NTx))
-    #n_ty=np.minimum(shift_Ty[1:]+ny,np.repeat(Ny,NTy))
-    #calculate tiles size,may need tiles of same size
-    #n_tx,n_ty=np.meshgrid(n_tx,n_ty)
     
     #generate mapid for tiles
     tiles_idx=map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
@@ -148,7 +143,7 @@ if True:
             frames_rand_i=np.array([frames_rand[i] for i in grouped[j]])[0,:,:,:]
             
             #extract information from Gplan
-            Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':Gplan['bw']}
+            Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':Gplan['bw']//NTx,'nx':Gplan['nx'],'ny':Gplan['ny']}
             
             #find the mapid that corresponds to the frames in the tile
             #mapidi=np.array([mapid[i] for i in grouped[j]])[0,:,:,:]
@@ -158,8 +153,7 @@ if True:
             #Overlap and Split for frames in the tile
             Overlapi=lambda frames: overlap_tiles_c(dxi,dyi,Nxi,Nyi,translations_xi,translations_yi,frames)
             Spliti = lambda image: split_tiles_c (dxi,dyi,nx,ny,translations_xi,translations_yi,image)
-            #Overlapi = lambda frames: Overlapc(frames,Nxi,Nyi,mapidi)
-            #Spliti = lambda img: Splitc(img,mapidi)
+            
             
             #get normalization
             reg=1e-8 #may have zero values in normalization
@@ -177,7 +171,7 @@ if True:
             
             
             
-        ####sync tiles,tiles may have different sizes ##not helping now..
+        ####sync tiles,tiles may have different sizes
         
         #get the sizes of tiles
         tiles_sizes = np.array([tiles_idx[i].shape for i in range(Ntiles)])
@@ -220,14 +214,22 @@ if True:
     Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gplan,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth=truth)
    
     #img3 calculated using AP without phase sync
-    img3,frames, residuals_nosync = Alternating_projections(False,img_initial,maxiter=100)
+    img3,frames, residuals_nosync,time_sync1 = Alternating_projections(False,img_initial,maxiter)
     reset_times()
     #img4 calculated using AP with phase sync
-    img4,frames, residuals_wsync = Alternating_projections(True,img_initial,maxiter=100)
+    img4,frames, residuals_wsync,time_sync2 = Alternating_projections(True,img_initial,maxiter)
     timers=get_times()
-    print(timers)
-
-
+    #print('timer no tilewise',timers)
+    reset_times()
+    #img10 calculated using AP with phase sync tile-wise
+    Tiles_plan=Tiles_plan(translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
+    Sync_tiles_plan=Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny)
+    Alternating_projections_tiles=lambda opt,img_initial,maxiter:Alternating_projections_tiles_c(opt,img_initial,frames_data, illumination,Sync_tiles_plan,Tiles_plan,Overlapc,Split,Splitc,flatten,Gramiam_plan,maxiter, Nx,Ny,img_truth = truth)
+    img10,residuals_tiles_wsync,time_sync_total1=Alternating_projections_tiles(True,img_initial,maxiter)
+    #print('timer w tilewise',timers)
+    reset_times()
+    img11,residuals_tiles_nosync,time_sync_total2=Alternating_projections_tiles(False,img_initial,maxiter)
+    
 #calculate mse
 nrm0=np.linalg.norm(truth)
 #nmse0=np.linalg.norm(truth-img)/nrm0
@@ -238,15 +240,15 @@ nmse3=mse_calc(truth,img3)/nrm0
 nmse4=mse_calc(truth,img4)/nrm0
 nmse6=mse_calc(truth,img6)/nrm0
 nmse7=mse_calc(truth,img7)/nrm0
-
-
+nmse10=mse_calc(truth,img10)/nrm0
+nmse11=mse_calc(truth,img11)/nrm0
 
 #phase2=np.dot(np.reshape(img2,(1,np.size(img1))),np.reshape(truth,(np.size(img1),1)))[0,0]
 
 #print("nmse",nmse0,nmse1,nmse2)
 
 
-fig, axs = plt.subplots(nrows=4, ncols=2, sharex=True,figsize=(10,10))
+fig, axs = plt.subplots(nrows=5, ncols=2, sharex=True,figsize=(10,10))
 
 axs[0,0].set_title('Truth',fontsize=10)
 axs[0,0].imshow(abs(truth))
@@ -272,6 +274,12 @@ axs[3,0].imshow(abs(img3))
 axs[3,1].set_title('Alternating Projections with Sync:%2.2g' %( nmse4),fontsize=10)
 axs[3,1].imshow(abs(img4))
 
+axs[4,0].set_title('Alternating Projections with Sync tile-wise:%2.2g' %( nmse10),fontsize=10)
+axs[4,0].imshow(np.minimum(abs(img10),max(abs(truth).ravel())))#for scaling purpose. The recovered image at the slit are big
+
+axs[4,1].set_title('Alternating Projections tile-wise:%2.2g' %( nmse11),fontsize=10)
+axs[4,1].imshow(np.minimum(abs(img11),max(abs(truth).ravel())))
+
 plt.show()
 
 ##
@@ -280,16 +288,22 @@ fig, axs = plt.subplots(nrows=3, ncols=1, sharex=True,figsize=(10,10))
 # fig=plt.figure()
 axs[0].semilogy(residuals_nosync[:,0])
 axs[0].semilogy(residuals_wsync[:,0])
-axs[0].legend(['nosync', 'sync'])
+axs[0].semilogy(residuals_tiles_wsync[:,0])
+axs[0].semilogy(residuals_tiles_nosync[:,0])
+axs[0].legend(['nosync', 'sync','sync_tilewise','tile-wise'])
 axs[0].set_title('img-truth')
+
 axs[1].semilogy(residuals_nosync[:,1])
 axs[1].semilogy(residuals_wsync[:,1])
-axs[1].legend(['nosync', 'sync'])
-#axs[1].title('frames-data')
+axs[1].semilogy(residuals_tiles_wsync[:,1])
+axs[1].semilogy(residuals_tiles_nosync[:,1])
+axs[1].legend(['nosync', 'sync','sync_tilewise','tile-wise'])
 axs[1].set_title('frames-data')
 
 axs[2].semilogy(residuals_nosync[:,2])
 axs[2].semilogy(residuals_wsync[:,2])
-axs[2].legend(['nosync', 'sync'])
+axs[2].semilogy(residuals_tiles_wsync[:,2])
+axs[2].semilogy(residuals_tiles_nosync[:,2])
+axs[2].legend(['nosync', 'sync','sync_tilewise','tile-wise'])
 axs[2].set_title('frames overlapped')
 

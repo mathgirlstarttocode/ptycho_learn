@@ -13,7 +13,7 @@ import bisect
 # timers
 from timeit import default_timer as timer
 timers={'Gramiam':0, 'Gramiam_completion':0, 'Precondition':0,
-        'Eigensolver':0, 'Sync_setup':0, 'Overlap':0, 'Project_data':0}
+        'Eigensolver':0, 'Sync_setup':0, 'Overlap':0, 'Project_data':0,'Sync':0}
 
 def get_times():
     return timers
@@ -188,39 +188,47 @@ def group_frames(translations_x,translations_y,shift_Tx,shift_Ty):
     grouped=(grouped_x-1)+(grouped_y-1)*(np.shape(shift_Tx)[0]-1) 
     return grouped
 
-def ket(ystackr,dx,dy,Tx,Ty,bw=0):  
+def ket(ystackr,dx,dy,x,y,nx,ny,bw=0):  
     #extracts the portion of the left frame that overlaps
     #dxi=dx[ii,jj].astype(int)
     #dyi=dy[ii,jj].astype(int)
-    nx,ny = ystackr.shape # to account for tiles of different sizes
+    #nx,ny = ystackr.shape # to account for tiles of different sizes
     dxi=dx.astype(int)
     dyi=dy.astype(int)
     
-    #plus the frame size
-    ket=ystackr[max([0,dyi])+bw:min(min([Tx,Tx+dyi]),max([0,dyi])+8)-bw,
-                max([0,dxi])+bw:min(min([Ty,Ty+dxi]),max([0,dxi])+8)-bw] 
-    
+    #plus the frame size, 16 is the frame size
+    #ket=ystackr[max([0,dyi])+bw:min(min([Tx,Tx+dyi]),max([0,dyi])+8)-bw,
+    #            max([0,dxi])+bw:min(min([Ty,Ty+dxi]),max([0,dxi])+8)-bw] 
+    ket=ystackr[max([0,dyi])+bw:min(x,x+dyi)-bw,
+                max([0,dxi])+bw:min(y,y+dxi)-bw] 
     #ket=ystackr[max([0,dyi])+bw:min([Tx,Tx+dyi])-bw,
     #            max([0,dxi])+bw:min([Ty,Ty+dxi])-bw] 
         
 
     return ket
 
-def bra(ystackl,dx,dy,Tx,Ty,bw=0):
+def bra(ystackl,dx,dy,x,y,nx,ny,bw=0):
     #calculates the portion of the right frame that overlaps
-    bra=ket(ystackl,dx,dy,Tx,Ty,bw)
+    bra=ket(ystackl,dx,dy,x,y,nx,ny,bw)
     return bra
 
-def braket(ystackl,ystackr,dd,bw=0):
+def braket(ystackl,ystackr,dd,nx,ny,bw=0):
     #calculates inner products between the overlapping portion
 #    dxi=dx[ii,jj]
 #    dyi=dy[ii,jj]
     dxi=dd.real
     dyi=dd.imag
-    Tx,Ty=ystackl.shape
-    
+    x1,y1=ystackl.shape
+    x2,y2=ystackr.shape
+    #consider tiles with different sizes
+    if dxi>0:
+        y=y2
+    else:y=y1
+    if dyi>0:
+        x=x2
+    else:x=x1
     #bracket=np.sum(np.multiply(bra(ystackl[jj],nx,ny,-dxi,-dyi),ket(ystackr[ii],nx,ny,dxi,dyi)))
-    bket=np.vdot(bra(ystackl,-dxi,-dyi,Tx,Ty,bw),ket(ystackr,dxi,dyi,Tx,Ty,bw))
+    bket=np.vdot(bra(ystackl,-dxi,-dyi,x,y,nx,ny,bw),ket(ystackr,dxi,dyi,x,y,nx,ny,bw))
     
     return bket
     
@@ -236,6 +244,8 @@ def Gramiam_calc(framesl,framesr,plan):
     dd=plan['dd']
     bw=plan['bw']
     val=plan['val']
+    nx=plan['nx']
+    ny=plan['ny']
     
     #col_map=lambda x:np.argwhere(np.unique(col)==x).flatten()#to account for indexing of frames when divide into tiles
     #row_map=lambda x:np.argwhere(np.unique(row)==x).flatten()
@@ -249,7 +259,7 @@ def Gramiam_calc(framesl,framesr,plan):
  
     def braket_i(ii):
         #val[ii] = braket(framesl[col_map(col[ii])][0,:,:],framesr[row_map(row[ii])][0,:,:],dd[ii],bw)
-        val[ii] = braket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
+        val[ii] = braket(framesl[col[ii]],framesr[row[ii]],dd[ii],nx,ny,bw)
     #def proc1(ii):
     #    return braket(framesl[col[ii]],framesr[row[ii]],dd[ii],bw)
     
@@ -296,7 +306,7 @@ def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw =0):
 #   val=np.empty((nnz,1),dtype=np.complex128)
     val = shared_array(shape=(nnz,1),dtype=np.complex128)
     
-    plan={'col':col,'row':row,'dd':dd, 'val':val,'bw':bw}
+    plan={'col':col,'row':row,'dd':dd, 'val':val,'bw':bw,'nx':nx,'ny':ny}
     #Gramiam = lambda framesl,framesr: Gramiam_calc(framesl,framesr,plan)
     return  plan
     
@@ -356,11 +366,12 @@ def Eigensolver(H):
 
 
 
-def synchronize_frames_c(frames, illumination, normalization,Gplan, bw=0,):
+def synchronize_frames_c(frames, illumination, normalization,Gplan):
     #col,row,dx,dy=frames_overlap(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
     # Gramiam = Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny)
 
-    time0=timer()   
+    time0=timer()
+    bw=Gplan['bw']
     framesl=Illuminate_frames(frames,np.conj(illumination))
     framesr=framesl*normalization    
     timers['Sync_setup']+=timer()-time0
@@ -381,29 +392,87 @@ def synchronize_frames_c(frames, illumination, normalization,Gplan, bw=0,):
     omega=Eigensolver(H1)
     return omega
 
-def Tiles_plan(groupie,shift_Tx,shift_Ty,nx,ny,Nx,Ny,Gplan,frames,mapid,illumination):
+def Tiles_plan(translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy):
+    #number of tiles
+    Ntiles=NTx*NTy
     
-    if groupie != None:
-        grouped=[np.where(groupie==i) for i in range(4)]
+    #make tiles
+    shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy) #calculate divide point of image
     
-    for j in len(grouped):
-            #group frames and mapid, sync within each tile
-        Nxi=min(shift_Tx[j+1]-shift_Tx[j]+nx,Nx) #get the image size within each tile
-        Nyi=min(shift_Ty[j+1]-shift_Ty[j]+ny,Ny)
-        idxi=np.in1d(Gplan["col"], grouped[j])
+    #coordinates of each tile
+    translations_tx,translations_ty=np.meshgrid(shift_Tx[0:-1],shift_Ty[0:-1]) 
+    
+    #generate mapid for tiles
+    tiles_idx=map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
+    
+    #sort frames into tiles
+    groupie=group_frames(translations_x,translations_y,shift_Tx,shift_Ty)
+        
+    #seperate frames into groups, according to tiles
+    grouped=[np.where(groupie==i) for i in range(NTx*NTy)]
+    
+    Tiles_plan={'Ntiles':Ntiles,'shift_Tx':shift_Tx,'shift_Ty':shift_Ty,'translations_tx':translations_tx,\
+                'translations_ty':translations_ty,'tiles_idx':tiles_idx,'groupie':groupie,\
+                'grouped':grouped}
+    
+    return Tiles_plan
+
+
+def Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny):  
+   
+    Ntiles=NTx*NTy
+    
+    shift_Tx=Tiles_plan['shift_Tx']
+    shift_Ty=Tiles_plan['shift_Ty']
+    grouped =Tiles_plan['grouped']
+    
+    #initialization 
+    Sync_tiles_plan=[{} for i in range(Ntiles)]
+        
+    #loop over all tiles
+    for j in range(len(grouped)):
+        
+        #find the tile size, including the halo
+        Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx
+        Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny
+            
+        #get the shift of tile
+        dxi=shift_Tx[j%NTx]
+        dyi=shift_Ty[j//NTx]
+            
+        #find all frames that are in the tile
+        idxi=np.in1d(Gplan["col"], grouped[j]) 
+        idyi=np.in1d(Gplan["row"],grouped[j]) 
+        idxi=idxi & idyi
+        
         nframesi=np.size(grouped[j])
-            
-        framesi=np.array([frames[i] for i in grouped[j]])[0,:,:,:]
-        mapidi=np.array([mapid[i] for i in grouped[j]])[0,:,:,:]
-            
-        Overlapi = lambda frames: Overlapc(frames,Nxi,Nyi,mapidi)
-        Spliti = lambda img: Splitc(img,mapidi)
+        frames_datai=np.array([frames_data[i] for i in grouped[j]])[0,:,:,:]
+        
+        #extract information from Gplan
+        Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':0,'nx':Gplan['nx'],'ny':Gplan['ny']}
+        
+        #find the mapid that corresponds to the frames in the tile
+        #mapidi=np.array([mapid[i] for i in grouped[j]])[0,:,:,:]
+        translations_xi=np.array([translations_x[i] for i in grouped[j]])[0,:,:,:]
+        translations_yi=np.array([translations_y[i] for i in grouped[j]])[0,:,:,:]
     
-        normalizationi=Overlapi(Replicate_frame(np.abs(illumination)**2,nframesi))
-            
-        inormalization_split_i=Spliti(1/normalizationi)
-            
-        return idxi,Gplan     
+        #Overlap and Split for frames in the tile
+        Overlapi=lambda frames,dx=dxi,dy=dyi,Nx=Nxi,Ny=Nyi,translations_x=translations_xi,translations_y=translations_yi \
+            : overlap_tiles_c(dx,dy,Nx,Ny,translations_x,translations_y,frames)
+        Spliti = lambda image,dx=dxi,dy=dyi,translations_x=translations_xi,translations_y=translations_yi\
+            : split_tiles_c (dx,dy,nx,ny,translations_x,translations_y,image)
+        
+        #get normalization
+        reg=1e-8 #may have zero values in normalization
+        normalizationi=Overlapi(Replicate_frame(np.abs(illumination)**2,nframesi))           
+        inormalization_split_i=Spliti(1/(normalizationi+reg)) 
+        
+        Sync_tiles_plan[j]={'Gplani':Gplani,'frames_datai':frames_datai,\
+                            'dxi':dxi,'dyi':dyi,'Nxi':Nxi,'Nyi':Nyi,'translations_xi':translations_xi,\
+                            'translations_yi':translations_yi,'Overlapi':Overlapi,'Spliti':Spliti,\
+                             'normalizationi':normalizationi,'inormalization_split_i':inormalization_split_i }
+    
+    return Sync_tiles_plan
     
 #def synchronize_frames_plan(inormalization_split,Gramiam):
 #    omega=lambda frames synchronize_frames_c(frames, illumination, inormalization_split, Gramiam)
