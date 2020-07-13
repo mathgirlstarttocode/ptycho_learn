@@ -26,14 +26,14 @@ from Solvers import Alternating_projections_c,Alternating_projections_tiles_c
 
 
 # define x dimensions (frames, step, image)
-nx=16 # frame size
+nx=32 # frame size
 Dx=5 # Step size
-nnx=16 # number of frames in x direction
+nnx=32 # number of frames in x direction
 Nx = Dx*nnx
 #Nx=256
-bw1=3 # cropping border width 
+bw1=13 # cropping border width 
 bw2=0 #cropping border width for sync tile-wise
-NTx=nnx//7 #number of tiles in x direction
+NTx=nnx//4 #number of tiles in x direction
 
 # same thing for y
 ny=nx 
@@ -102,7 +102,7 @@ if True:
     #phase sync for rand frames by tiles
     
     #make tiles
-    shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy) #calculate divide point of image
+    shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy,translations_x,translations_y) #calculate divide point of image
     #coordinates of each tile
     translations_tx,translations_ty=np.meshgrid(shift_Tx[0:-1],shift_Ty[0:-1]) 
     
@@ -225,10 +225,10 @@ if True:
     Tiles_plan=Tiles_plan(translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
     Sync_tiles_plan=Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny)
     Alternating_projections_tiles=lambda opt,img_initial,maxiter:Alternating_projections_tiles_c(opt,img_initial,frames_data, illumination,Sync_tiles_plan,Tiles_plan,Overlapc,Split,Splitc,flatten,Gramiam_plan,maxiter, Nx,Ny,img_truth = truth)
-    img10,residuals_tiles_wsync,time_sync_total1=Alternating_projections_tiles(True,img_initial,maxiter)
+    img10,img_tiles,residuals_tiles_wsync,time_sync_total1=Alternating_projections_tiles(True,img_initial,maxiter)
     #print('timer w tilewise',timers)
     reset_times()
-    img11,residuals_tiles_nosync,time_sync_total2=Alternating_projections_tiles(False,img_initial,maxiter)
+    img11,img_tiles2,residuals_tiles_nosync,time_sync_total2=Alternating_projections_tiles(False,img_initial,maxiter)
     
 #calculate mse
 nrm0=np.linalg.norm(truth)
@@ -275,10 +275,12 @@ axs[3,1].set_title('Alternating Projections with Sync:%2.2g' %( nmse4),fontsize=
 axs[3,1].imshow(abs(img4))
 
 axs[4,0].set_title('Alternating Projections with Sync tile-wise:%2.2g' %( nmse10),fontsize=10)
-axs[4,0].imshow(np.minimum(abs(img10),max(abs(truth).ravel())))#for scaling purpose. The recovered image at the slit are big
+#axs[4,0].imshow(np.minimum(abs(img10),max(abs(truth).ravel())))#for scaling purpose. The recovered image at the slit are big
+axs[4,0].imshow(abs(img10))
 
 axs[4,1].set_title('Alternating Projections tile-wise:%2.2g' %( nmse11),fontsize=10)
-axs[4,1].imshow(np.minimum(abs(img11),max(abs(truth).ravel())))
+#axs[4,1].imshow(np.minimum(abs(img11),max(abs(truth).ravel())))
+axs[4,1].imshow(abs(img11))
 
 plt.show()
 

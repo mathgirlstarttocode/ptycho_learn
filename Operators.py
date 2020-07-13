@@ -50,19 +50,28 @@ def make_probe(nx,ny):
     probe=probe/max(abs(probe).flatten())
     return probe
 
-def make_tiles(Nx,Ny,NTx,NTy):    
+def make_tiles(Nx,Ny,NTx,NTy,translations_x,translations_y):    
     #gives coord for tiles, evenly distrubited (NTx,NTy)tiles over image of size(Nx,Ny)
-    shift_Tx=np.floor(np.linspace(0,Nx,NTx+1)).astype(int)
-    shift_Ty=np.floor(np.linspace(0,Ny,NTy+1)).astype(int)
-    
-    return shift_Tx, shift_Ty
+   # shift_Tx=np.floor(np.linspace(0,Nx,NTx+1)).astype(int)
+    #shift_Ty=np.floor(np.linspace(0,Ny,NTy+1)).astype(int)
+    #to make the upper left corner of the tiles coincide with a frame. 
+    #therefore every pixel within the tile is covered
+    ix=np.unique(translations_x).shape[0]
+    iy=np.unique(translations_y).shape[0]
+    shift_Tx=np.unique(translations_x)[::(ix//NTx)][0:NTx]
+    shift_Tx=np.append(shift_Tx,translations_x[-1]+1)
+    shift_Ty=np.unique(translations_y)[::(iy//NTy)][0:NTy]
+    shift_Ty=np.append(shift_Ty,translations_y[-1]+1)
+    return shift_Tx.astype(int), shift_Ty.astype(int)
 
 def make_translations(Dx,Dy,nnx,nny,Nx,Ny):
     # make scan position
-    ix,iy=np.meshgrid(np.arange(0,Dx*nnx,Dx)+Nx/2-Dx*nnx/2+1,
-                      np.arange(0,Dy*nny,Dy)+Ny/2-Dy*nny/2+1)
-    xshift=math.floor(Dx/2)*np.mod(np.arange(1,np.size(ix,1)+1),2)
-    ix=np.transpose(np.add(np.transpose(ix),xshift))
+    #ix,iy=np.meshgrid(np.arange(0,Dx*nnx,Dx)+Nx/2-Dx*nnx/2+1,
+    #                  np.arange(0,Dy*nny,Dy)+Ny/2-Dy*nny/2+1)
+    ix,iy=np.meshgrid(np.arange(0,Dx*nnx,Dx)+Nx/2-Dx*nnx/2,
+                       np.arange(0,Dy*nny,Dy)+Ny/2-Dy*nny/2)
+    #xshift=math.floor(Dx/2)*np.mod(np.arange(1,np.size(ix,1)+1),2)
+    #ix=np.transpose(np.add(np.transpose(ix),xshift))
     
     ix=np.reshape(ix,(nnx*nny,1,1))
     iy=np.reshape(iy,(nnx*nny,1,1))
@@ -142,6 +151,7 @@ def overlap_tiles_c (dxi,dyi,Nxi,Nyi,translations_xi,translations_yi,frames):
     imgi=np.zeros((Nyi,Nxi),dtype='complex128')
     
     for i in range(translations_xi.shape[0]):
+        print(i)
         imgi[int(translations_yi[i]-dyi): int(translations_yi[i] + frames.shape[-2]-dyi),\
              int(translations_xi[i]-dxi): int(translations_xi[i] + frames.shape[-1]-dxi)] \
              += frames[i % frames.shape[0]]
@@ -397,7 +407,7 @@ def Tiles_plan(translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy):
     Ntiles=NTx*NTy
     
     #make tiles
-    shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy) #calculate divide point of image
+    shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy,translations_x,translations_y) #calculate divide point of image
     
     #coordinates of each tile
     translations_tx,translations_ty=np.meshgrid(shift_Tx[0:-1],shift_Ty[0:-1]) 

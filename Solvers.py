@@ -106,4 +106,4 @@ def Alternating_projections_tiles_c(opt,img,frames_data, illumination,Sync_tiles
             #residuals[j,0] = nmse0
             
         #print('time sync:',time_sync)
-    return img, total_residuals,time_sync_total
+    return img,img_tiles, total_residuals,time_sync_total
