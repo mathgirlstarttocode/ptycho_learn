@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
+from mpi4py import MPI
 #import scipy as sp
 #import math
 #from scipy.sparse.linalg import eigsh
@@ -9,7 +10,7 @@ from Operators import Overlapc, Illuminate_frames,  Replicate_frame, Splitc #, f
 #from Operators import Gramiam, Eigensolver, Precondition
 from Operators import Gramiam_plan
 from Operators import synchronize_frames_c
-from Operators import make_tiles, map_tiles, group_frames,overlap_tiles_c,split_tiles_c,flatten,Tiles_plan,Sync_tiles_c
+from Operators import size_tiles,make_tiles, map_tiles, group_frames,overlap_tiles_c,split_tiles_c,flatten,Tiles_plan_c,Sync_tiles_c
 from Operators import get_times, reset_times
 reset_times()
 
@@ -28,12 +29,13 @@ from Solvers import Alternating_projections_c,Alternating_projections_tiles_c
 # define x dimensions (frames, step, image)
 nx=32 # frame size
 Dx=5 # Step size
-nnx=32 # number of frames in x direction
+nnx=8 # number of frames in x direction
 Nx = Dx*nnx
-#Nx=256
-bw1=13 # cropping border width 
+#Nx=Dx*(nnx-1)+nx
+bw1=0 # cropping border width 
 bw2=0 #cropping border width for sync tile-wise
-NTx=nnx//4 #number of tiles in x direction
+#NTx=nnx//4 #number of tiles in x direction
+NTx=4 #number of tiles in x direction
 
 # same thing for y
 ny=nx 
@@ -41,11 +43,11 @@ nny=nnx
 Dy=Dx
 nframes=nnx*nny #total number of frames
 Ny = Dy*nny
-#Ny=256
+#Ny=Nx
 NTy=NTx
 Ntiles=NTx*NTy
 
-maxiter=100
+maxiter=200
 #############################3
 
 #load image
@@ -94,20 +96,23 @@ if True:
 
     import scipy as sp
     Gplan['Preconditioner']=sp.sparse.diags(1/frames_norm)
-    omega=synchronize_frames_c(frames_rand, illumination, inormalization_split, Gplan)
-    frames_sync=frames_rand*omega
+    omega2=synchronize_frames_c(frames_rand, illumination, inormalization_split, Gplan)
+    frames_sync=frames_rand*omega2
     img2=Overlap(Illuminate_frames(frames_sync,np.conj(illumination)))/normalization
     
     
     #phase sync for rand frames by tiles
     
     #make tiles
-    shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy,translations_x,translations_y) #calculate divide point of image
+    #shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy,translations_x,translations_y) #calculate divide point of image
+    shift_Tx, shift_Ty=make_tiles(Nx,Ny,NTx,NTy,translations_x,translations_y) #calculate divide point of image
     #coordinates of each tile
     translations_tx,translations_ty=np.meshgrid(shift_Tx[0:-1],shift_Ty[0:-1]) 
     
     #generate mapid for tiles
-    tiles_idx=map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
+    #tiles_idx=map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
+    tiles_size=size_tiles(Ntiles,NTx,shift_Tx,shift_Ty,Dx,Dy,nx,ny)
+    tiles_idx=map_tiles(shift_Tx,shift_Ty,tiles_size,NTx,NTy,Nx,Ny,nx,ny,Dx,Dy)
     
     #sort frames into tiles
     groupie=group_frames(translations_x,translations_y,shift_Tx,shift_Ty)
@@ -121,13 +126,24 @@ if True:
         img_tiles=[[] for i in range(Ntiles)]
         sync_tiles=[[] for i in range(Ntiles)]
         tiles_size=np.zeros((Ntiles,2),dtype=int)
+        
+        ###testing
+        #frames_rand=Illuminate_frames(Split(np.ones(np.shape(img))),illumination)
+        #frames_rand=Project_data(frames_rand,np.abs(np.fft.fft2(Illuminate_frames(Split(truth),illumination)))**2)[0]
+       
+        #####
+            
         #loop over all tiles
         for j in range(len(grouped)):
 
             #find the tile size, including the halo
-            Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx
-            Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny
-            tiles_size[j,:]=[Nxi,Nyi]
+            #Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx           
+            Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx-Dx
+            #Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny
+            Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny-Dy
+            
+            #tiles_size[j,:]=[Nxi,Nyi]
+            tiles_size[j,:]=[Nyi,Nxi]
             #Nxi=min(shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx,Nx) #get the image size within each tile
             #Nyi=min(shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny,Ny)
             
@@ -143,7 +159,8 @@ if True:
             frames_rand_i=np.array([frames_rand[i] for i in grouped[j]])[0,:,:,:]
             
             #extract information from Gplan
-            Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':Gplan['bw']//NTx,'nx':Gplan['nx'],'ny':Gplan['ny']}
+            #Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':Gplan['bw']//NTx,'nx':Gplan['nx'],'ny':Gplan['ny']}
+            Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':bw2,'nx':Gplan['nx'],'ny':Gplan['ny']}
             
             #find the mapid that corresponds to the frames in the tile
             #mapidi=np.array([mapid[i] for i in grouped[j]])[0,:,:,:]
@@ -166,7 +183,7 @@ if True:
             omega_i=synchronize_frames_c(frames_rand_i, illumination, inormalization_split_i, Gplani) #ok
             
             sync_tiles[j]=frames_rand_i*omega_i
-            
+                      
             img_tiles[j]=Overlapi(Illuminate_frames(sync_tiles[j],np.conj(illumination)))/(normalizationi+reg)
             
             
@@ -174,7 +191,7 @@ if True:
         ####sync tiles,tiles may have different sizes
         
         #get the sizes of tiles
-        tiles_sizes = np.array([tiles_idx[i].shape for i in range(Ntiles)])
+        #tiles_sizes = np.array([tiles_idx[i].shape for i in range(Ntiles)])
         
         #Overlap and Split for tiles sync
         Overlap_tiles=lambda img_tiles:Overlapc(flatten(img_tiles),Nx,Ny, flatten(tiles_idx))           
@@ -182,26 +199,27 @@ if True:
         
         #calculate normalization, illumination=1
         average_normalization=Overlap_tiles(np.ones((flatten(img_tiles).shape)))
-            
+          
         #img without tile sync
         img6=Overlap_tiles(img_tiles)/average_normalization
         
         #tile phase sync
         inormalization_split_tiles = Split_tiles(1/average_normalization) #now list
            
-        Gplan_tiles=Gramiam_plan(translations_tx.T,translations_ty.T,Ntiles,tiles_sizes[:,0].reshape(Ntiles,1),tiles_sizes[:,1].reshape(Ntiles,1),Nx,Ny,bw=0)
+        Gplan_tiles=Gramiam_plan(translations_tx.T,translations_ty.T,Ntiles,tiles_size[:,0].reshape(Ntiles,1),tiles_size[:,1].reshape(Ntiles,1),Nx,Ny,bw=0)
               
-        omega_tiles=synchronize_frames_c(np.array(img_tiles), 1+0j, inormalization_split_tiles, Gplan_tiles)
+        omega_tiles=synchronize_frames_c(np.array(img_tiles), 1+0j, inormalization_split_tiles, Gplan_tiles)#close to 1
         
         tiles_sync=[img_tiles[i]*omega_tiles[i] for i in range(Ntiles)]
-        
+
+        #ok
         img7=Overlap_tiles(tiles_sync)/average_normalization
     
     ##AP 
     # simulate data
     
-    frames_data = np.abs(np.fft.fft2(frames))**2 #squared magnitude from the truth
-
+    #frames_data = np.abs(np.fft.fft2(frames))**2 #squared magnitude from the truth
+    frames_data = np.abs(np.fft.fft2(Illuminate_frames(Split(truth),illumination)))**2
     # precompute the preconditioner
     #frames_norm=np.sqrt(np.sum(frames_data,axis=(1,2)))/np.sqrt(nx*ny) # norm (fft-rescaled)
     #Gplan['Preconditioner']=sp.sparse.diags(1/frames_norm)
@@ -214,22 +232,26 @@ if True:
     Alternating_projections=lambda opt,img_initial,maxiter: Alternating_projections_c(opt,img_initial,Gplan,frames_data, illumination, normalization, Overlap, Split, maxiter, img_truth=truth)
    
     #img3 calculated using AP without phase sync
-    img3,frames, residuals_nosync,time_sync1 = Alternating_projections(False,img_initial,maxiter)
+    img3,frames3, residuals_nosync,time_sync1 = Alternating_projections(False,img_initial,maxiter)
     reset_times()
     #img4 calculated using AP with phase sync
-    img4,frames, residuals_wsync,time_sync2 = Alternating_projections(True,img_initial,maxiter)
+    img4,frames4, residuals_wsync,time_sync2 = Alternating_projections(True,img_initial,maxiter)
     timers=get_times()
     #print('timer no tilewise',timers)
     reset_times()
     #img10 calculated using AP with phase sync tile-wise
-    Tiles_plan=Tiles_plan(translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
-    Sync_tiles_plan=Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny)
-    Alternating_projections_tiles=lambda opt,img_initial,maxiter:Alternating_projections_tiles_c(opt,img_initial,frames_data, illumination,Sync_tiles_plan,Tiles_plan,Overlapc,Split,Splitc,flatten,Gramiam_plan,maxiter, Nx,Ny,img_truth = truth)
-    img10,img_tiles,residuals_tiles_wsync,time_sync_total1=Alternating_projections_tiles(True,img_initial,maxiter)
+    Tiles_plan=Tiles_plan_c(shift_Tx,shift_Ty,translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
+    #Sync_tiles_plan=Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny)
+    Sync_tiles_plan=Sync_tiles_c(frames_data,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny,Dx,Dy)
+    Alternating_projections_tiles=lambda opt,opt1,img_initial,maxiter:Alternating_projections_tiles_c(opt,opt1,img_initial,frames_data, illumination,Sync_tiles_plan,Tiles_plan,Alternating_projections,Overlapc,Split,Splitc,flatten,Gramiam_plan,maxiter, Nx,Ny,img_truth = truth)
+    img10,img_tiles10,residuals_tiles_wsync,time_sync_total1=Alternating_projections_tiles(True,1,img_initial,maxiter)
+    
     #print('timer w tilewise',timers)
     reset_times()
-    img11,img_tiles2,residuals_tiles_nosync,time_sync_total2=Alternating_projections_tiles(False,img_initial,maxiter)
+    img11,img_tiles11,residuals_tiles_nosync,time_sync_total2=Alternating_projections_tiles(False,1,img_initial,maxiter)
     
+    img12,img_tiles12,residuals_tiles_wsync2,time_sync_total1=Alternating_projections_tiles(True,2,img_initial,maxiter)
+    img13,img_tiles13,residuals_tiles_wsync2,time_sync_total1=Alternating_projections_tiles(False,2,img_initial,maxiter)
 #calculate mse
 nrm0=np.linalg.norm(truth)
 #nmse0=np.linalg.norm(truth-img)/nrm0
@@ -242,13 +264,15 @@ nmse6=mse_calc(truth,img6)/nrm0
 nmse7=mse_calc(truth,img7)/nrm0
 nmse10=mse_calc(truth,img10)/nrm0
 nmse11=mse_calc(truth,img11)/nrm0
+nmse12=mse_calc(truth,img12)/nrm0
+nmse13=mse_calc(truth,img13)/nrm0
 
 #phase2=np.dot(np.reshape(img2,(1,np.size(img1))),np.reshape(truth,(np.size(img1),1)))[0,0]
 
 #print("nmse",nmse0,nmse1,nmse2)
 
 
-fig, axs = plt.subplots(nrows=5, ncols=2, sharex=True,figsize=(10,10))
+fig, axs = plt.subplots(nrows=6, ncols=2, sharex=True,figsize=(10,10))
 
 axs[0,0].set_title('Truth',fontsize=10)
 axs[0,0].imshow(abs(truth))
@@ -275,12 +299,21 @@ axs[3,1].set_title('Alternating Projections with Sync:%2.2g' %( nmse4),fontsize=
 axs[3,1].imshow(abs(img4))
 
 axs[4,0].set_title('Alternating Projections with Sync tile-wise:%2.2g' %( nmse10),fontsize=10)
-#axs[4,0].imshow(np.minimum(abs(img10),max(abs(truth).ravel())))#for scaling purpose. The recovered image at the slit are big
+axs[4,0].imshow(np.minimum(abs(img10),max(abs(truth).ravel())))#for scaling purpose. The recovered image at the slit are big
 axs[4,0].imshow(abs(img10))
 
 axs[4,1].set_title('Alternating Projections tile-wise:%2.2g' %( nmse11),fontsize=10)
 #axs[4,1].imshow(np.minimum(abs(img11),max(abs(truth).ravel())))
 axs[4,1].imshow(abs(img11))
+
+axs[5,0].set_title('Alternating Projections with Sync tile-wise:%2.2g' %( nmse12),fontsize=10)
+#axs[4,0].imshow(np.minimum(abs(img10),max(abs(truth).ravel())))#for scaling purpose. The recovered image at the slit are big
+axs[5,0].imshow(abs(img12))
+
+axs[5,1].set_title('Alternating Projections tile-wise:%2.2g' %( nmse13),fontsize=10)
+#axs[4,1].imshow(np.minimum(abs(img11),max(abs(truth).ravel())))
+axs[5,1].imshow(abs(img13))
+
 
 plt.show()
 

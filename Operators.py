@@ -59,9 +59,11 @@ def make_tiles(Nx,Ny,NTx,NTy,translations_x,translations_y):
     ix=np.unique(translations_x).shape[0]
     iy=np.unique(translations_y).shape[0]
     shift_Tx=np.unique(translations_x)[::(ix//NTx)][0:NTx]
-    shift_Tx=np.append(shift_Tx,translations_x[-1]+1)
+    #shift_Tx=np.append(shift_Tx,translations_x[-1]+1)
+    shift_Tx=np.append(shift_Tx,Nx)
     shift_Ty=np.unique(translations_y)[::(iy//NTy)][0:NTy]
-    shift_Ty=np.append(shift_Ty,translations_y[-1]+1)
+    shift_Ty=np.append(shift_Ty,Ny)
+    #shift_Ty=np.append(shift_Ty,translations_y[-1]+1)
     return shift_Tx.astype(int), shift_Ty.astype(int)
 
 def make_translations(Dx,Dy,nnx,nny,Nx,Ny):
@@ -100,22 +102,37 @@ def map_frames(translations_x,translations_y,nx,ny,Nx,Ny):
     return mapid
 
 
-def map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy): 
-    
+#def map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy): 
+def map_tiles(shift_Tx,shift_Ty,tiles_size,NTx,NTy,Nx,Ny,nx,ny,Dx,Dy):     
     #map tiles to image indices 
-    xframeidx,yframeidx=np.meshgrid(np.arange(max(Nx,max(shift_Tx)+nx))%Nx,np.arange(max(Ny,max(shift_Ty)+ny))%Ny)
+    #xframeidx,yframeidx=np.meshgrid(np.arange(max(Nx,max(shift_Tx)+nx))%Nx,np.arange(max(Ny,max(shift_Ty)+ny))%Ny)
+    xframeidx,yframeidx=np.meshgrid(np.arange(Nx-Dx+nx)%Nx,np.arange(Ny-Dy+ny)%Ny)
     
     idxx=xframeidx+yframeidx*Nx
     tiles_idx = [[] for i in range(NTx*NTy)]
     
     for m in range(NTx):
         for n in range(NTy):
-            tiles_idx[m+n*NTx]= idxx[shift_Ty[n]: (shift_Ty[n+1]+nx),shift_Tx[m]: (shift_Tx[m+1]+ny)]
-            #tiles_idx[m+n*NTx]= idxx[shift_Ty[n]: shift_Ty[n]+,shift_Tx[m]: shift_Tx[m]+40]
+            #tiles_idx[m+n*NTx]= idxx[shift_Ty[n]: (shift_Ty[n+1]+nx),shift_Tx[m]: (shift_Tx[m+1]+ny)]
+            tiles_idx[m+n*NTx]= idxx[shift_Ty[n]:shift_Ty[n]+tiles_size[m+n*NTx,0] ,shift_Tx[m]: shift_Tx[m]+tiles_size[m+n*NTx,1]]
     tiles_idx=np.array(tiles_idx)     
     # test=np.hstack((tiles_idx[i] for i in range(4)))                  
     return tiles_idx
 
+def size_tiles(Ntiles,NTx,shift_Tx,shift_Ty,Dx,Dy,nx,ny):
+    tiles_size=np.zeros((Ntiles,2),dtype=int)
+        #loop over all tiles
+    for j in range(Ntiles):
+
+            #find the tile size, including the halo
+            #Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx           
+        Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx-Dx
+            #Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny
+        Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny-Dy
+            
+            #tiles_size[j,:]=[Nxi,Nyi]
+        tiles_size[j,:]=[Nyi,Nxi]
+    return tiles_size
 #def Split(img,col,row):
 #    Split=img[row,col]         
 #    return Split
@@ -151,7 +168,7 @@ def overlap_tiles_c (dxi,dyi,Nxi,Nyi,translations_xi,translations_yi,frames):
     imgi=np.zeros((Nyi,Nxi),dtype='complex128')
     
     for i in range(translations_xi.shape[0]):
-        print(i)
+        #print(i)
         imgi[int(translations_yi[i]-dyi): int(translations_yi[i] + frames.shape[-2]-dyi),\
              int(translations_xi[i]-dxi): int(translations_xi[i] + frames.shape[-1]-dxi)] \
              += frames[i % frames.shape[0]]
@@ -190,6 +207,7 @@ def Stack_frames(frames,omega):
 
 def group_frames(translations_x,translations_y,shift_Tx,shift_Ty):
     #find the interval for which the frames lie in
+    
     find_x=lambda x: bisect.bisect_right(shift_Tx, x)
     find_y=lambda y: bisect.bisect_right(shift_Ty, y)
     
@@ -198,6 +216,8 @@ def group_frames(translations_x,translations_y,shift_Tx,shift_Ty):
     grouped=(grouped_x-1)+(grouped_y-1)*(np.shape(shift_Tx)[0]-1) 
     return grouped
 
+    
+    
 def ket(ystackr,dx,dy,x,y,nx,ny,bw=0):  
     #extracts the portion of the left frame that overlaps
     #dxi=dx[ii,jj].astype(int)
@@ -289,7 +309,7 @@ def Gramiam_calc(framesl,framesr,plan):
     
     return H
 
-
+    
 def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw =0):
     # embed all geometric parameters into the gramiam function
     #calculates the difference of the coordinates between all frames
@@ -402,18 +422,33 @@ def synchronize_frames_c(frames, illumination, normalization,Gplan):
     omega=Eigensolver(H1)
     return omega
 
-def Tiles_plan(translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy):
+def Tiles_plan_c(shift_Tx,shift_Ty,translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy):
     #number of tiles
     Ntiles=NTx*NTy
     
+    #find the size of tiles
+    tiles_size=np.zeros((Ntiles,2),dtype=int)
+    #loop over all tiles
+    for j in range(Ntiles):
+        #find the tile size, including the halo
+        #Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx           
+        Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx-Dx
+        #Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny
+        Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny-Dy
+            
+        #tiles_size[j,:]=[Nxi,Nyi]
+        tiles_size[j,:]=[Nyi,Nxi]
+        
     #make tiles
-    shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy,translations_x,translations_y) #calculate divide point of image
+    #shift_Tx, shift_Ty=make_tiles(max(translations_x.ravel())+1,max(translations_y.ravel())+1,NTx,NTy,translations_x,translations_y) #calculate divide point of image
+    shift_Tx, shift_Ty=make_tiles(Nx,Ny,NTx,NTy,translations_x,translations_y)
     
     #coordinates of each tile
     translations_tx,translations_ty=np.meshgrid(shift_Tx[0:-1],shift_Ty[0:-1]) 
     
     #generate mapid for tiles
-    tiles_idx=map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
+    #tiles_idx=map_tiles(shift_Tx,shift_Ty,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy)
+    tiles_idx=map_tiles(shift_Tx,shift_Ty,tiles_size,NTx,NTy,Nx,Ny,nx,ny,Dx,Dy)
     
     #sort frames into tiles
     groupie=group_frames(translations_x,translations_y,shift_Tx,shift_Ty)
@@ -423,13 +458,13 @@ def Tiles_plan(translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy):
     
     Tiles_plan={'Ntiles':Ntiles,'shift_Tx':shift_Tx,'shift_Ty':shift_Ty,'translations_tx':translations_tx,\
                 'translations_ty':translations_ty,'tiles_idx':tiles_idx,'groupie':groupie,\
-                'grouped':grouped}
+                'grouped':grouped,'tiles_size':tiles_size}
     
     return Tiles_plan
 
 
-def Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny):  
-   
+#def Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny):  
+def Sync_tiles_c(frames_data,illumination,Tiles_plan,Gplan,translations_x,translations_y,NTx,NTy,nx,ny,Dx,Dy):     
     Ntiles=NTx*NTy
     
     shift_Tx=Tiles_plan['shift_Tx']
@@ -443,9 +478,11 @@ def Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x
     for j in range(len(grouped)):
         
         #find the tile size, including the halo
-        Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx
-        Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny
-            
+        #Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx
+        Nxi=shift_Tx[j%NTx+1]-shift_Tx[j%NTx]+nx-Dx
+        #Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny
+        Nyi=shift_Ty[j//NTx+1]-shift_Ty[j//NTx]+ny-Dy
+        
         #get the shift of tile
         dxi=shift_Tx[j%NTx]
         dyi=shift_Ty[j//NTx]
@@ -459,7 +496,7 @@ def Sync_tiles_c(frames_data,frames,illumination,Tiles_plan,Gplan,translations_x
         frames_datai=np.array([frames_data[i] for i in grouped[j]])[0,:,:,:]
         
         #extract information from Gplan
-        Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':0,'nx':Gplan['nx'],'ny':Gplan['ny']}
+        Gplani={'col':Gplan['col'][idxi],'row':Gplan['row'][idxi],'dd':Gplan['dd'][idxi], 'val':Gplan['val'][idxi],'bw':Gplan['bw']//NTx,'nx':Gplan['nx'],'ny':Gplan['ny']}
         
         #find the mapid that corresponds to the frames in the tile
         #mapidi=np.array([mapid[i] for i in grouped[j]])[0,:,:,:]
@@ -519,6 +556,34 @@ def Project_data(frames,frames_data):
     timers['Project_data']+=timer()-time0
     return frames, mse
     
+##illum refinement#################################
+def refine_illum(illum,frames, Overlap,Split):
+
+    illum_epsilon = 1e-02
+    
+    illum=np.sum(frames*Split(Overlap(Illuminate_frames(np.conj(frames),np.conj(illum)))),axis=0)
+    
+    illum_normalization = 1/(np.sum(Split(Overlap(np.abs(frames)**2)), axis = 0)+illum_epsilon)
+
+    illum=illum*illum_normalization
+    
+    illum=illum/np.linalg.norm(illum)
+    
+    return illum
+
+def refine_frames(illum,frames,Overlap,Split):
+    
+    frames_epsilon=1e-02
+    
+    frames1=Illuminate_frames(Split(Overlap(Illuminate_frames(frames,np.conj(illum)))),illum)
+    
+    frames=frames1/(Split(Overlap(Replicate_frame(np.abs(illum)**2,frames.shape[0])))+frames_epsilon)
+    
+    frames=frames/(np.linalg.norm(frames,axis=0)+frames_epsilon)
+    
+    return frames
+    
+####################    
 
 import ctypes
 from multiprocessing import sharedctypes
