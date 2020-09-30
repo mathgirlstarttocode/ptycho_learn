@@ -50,6 +50,17 @@ def make_probe(nx,ny):
     probe=probe/max(abs(probe).flatten())
     return probe
 
+def make_probe2(nx,ny):
+    # make an illumination (probe)
+    xi=np.reshape(np.arange(1,nx+1)-nx/2,(nx,1))
+    rr=np.sqrt(xi**2+(xi.T)**2)
+    r1= 0.015*nx*3 #define zone plate circles
+    r2= 0.065*nx*3
+    Fprobe=np.fft.fftshift((rr>=r1) & (rr<=r2))
+    probe=np.fft.fftshift(np.fft.ifft2(Fprobe))
+    probe=probe/max(abs(probe).flatten())
+    return probe
+
 def make_tiles(Nx,Ny,NTx,NTy,translations_x,translations_y):    
     #gives coord for tiles, evenly distrubited (NTx,NTy)tiles over image of size(Nx,Ny)
    # shift_Tx=np.floor(np.linspace(0,Nx,NTx+1)).astype(int)
@@ -318,7 +329,7 @@ def Gramiam_plan(translations_x,translations_y,nframes,nx,ny,Nx,Ny,bw =0):
     dx=np.subtract(dx,np.transpose(dx))
     dy=np.subtract(dy,np.transpose(dy))
     
-    #calculates the wrapping effect for a period boundary
+    #calculates the wrapping effect for a periodic boundary
     dx=-(dx+Nx*((dx < (-Nx/2)).astype(float)-(dx > (Nx/2)).astype(float)))
     dy=-(dy+Ny*((dy < (-Ny/2)).astype(float)-(dy > (Ny/2)).astype(float)))    
  
@@ -420,7 +431,7 @@ def synchronize_frames_c(frames, illumination, normalization,Gplan):
 
     #compute the largest eigenvalue of H1    
     omega=Eigensolver(H1)
-    return omega
+    return H,omega
 
 def Tiles_plan_c(shift_Tx,shift_Ty,translations_x,translations_y,NTx,NTy,Nx,Ny,nx,ny,nnx,nny,Dx,Dy):
     #number of tiles
@@ -517,7 +528,7 @@ def Sync_tiles_c(frames_data,illumination,Tiles_plan,Gplan,translations_x,transl
         Sync_tiles_plan[j]={'Gplani':Gplani,'frames_datai':frames_datai,\
                             'dxi':dxi,'dyi':dyi,'Nxi':Nxi,'Nyi':Nyi,'translations_xi':translations_xi,\
                             'translations_yi':translations_yi,'Overlapi':Overlapi,'Spliti':Spliti,\
-                             'normalizationi':normalizationi,'inormalization_split_i':inormalization_split_i }
+                             'normalizationi':normalizationi,'inormalization_split_i':inormalization_split_i}
     
     return Sync_tiles_plan
     
@@ -557,30 +568,39 @@ def Project_data(frames,frames_data):
     return frames, mse
     
 ##illum refinement#################################
-def refine_illum(illum,frames, Overlap,Split):
+def refine_illum(illum,img,frames, Overlap,Split):
 
-    illum_epsilon = 1e-02
+    illum_old=illum+0
     
-    illum=np.sum(frames*Split(Overlap(Illuminate_frames(np.conj(frames),np.conj(illum)))),axis=0)
+    illum_epsilon = 1e-08
     
-    illum_normalization = 1/(np.sum(Split(Overlap(np.abs(frames)**2)), axis = 0)+illum_epsilon)
+    mm=np.linalg.norm(np.sum(np.conj(illum)*frames))/(64*np.sum(abs(illum**2)))
+    #mm=np.sum(frames,axis=0)/(64*(np.linalg.norm(illum)+illum_epsilon))
+    #mm=0
+    frames=frames-mm*illum
+    #frames=frames-mm
 
-    illum=illum*illum_normalization
+    illum=np.sum(frames*Split(Overlap(Illuminate_frames(np.conj(frames),illum))),axis=0)
     
-    illum=illum/np.linalg.norm(illum)
+    illum = illum/(np.sum(Split(Overlap(np.abs(frames)**2)), axis = 0)+illum_epsilon)
+                  
+    illum=illum*np.linalg.norm(illum_old)/np.linalg.norm(illum)
+    
+    illum=np.sum(np.conj(Split(img))*frames,axis=0)/np.sum(Split(abs(img)**2),axis=0)
     
     return illum
 
 def refine_frames(illum,frames,Overlap,Split):
     
-    frames_epsilon=1e-02
+    frames_epsilon=1e-08
     
-    frames1=Illuminate_frames(Split(Overlap(Illuminate_frames(frames,np.conj(illum)))),illum)
-    
-    frames=frames1/(Split(Overlap(Replicate_frame(np.abs(illum)**2,frames.shape[0])))+frames_epsilon)
-    
-    frames=frames/(np.linalg.norm(frames,axis=0)+frames_epsilon)
-    
+    #frames1=Illuminate_frames(Split(Overlap(Illuminate_frames(frames,np.conj(illum)))),illum)
+    img=Overlap(Illuminate_frames(frames,np.conj(illum)))
+    mu=np.sum(img)/(np.sum(abs(illum)**2)+frames_epsilon)
+   # mu=0
+    frames=Split(img+ 0.5*mu*frames_epsilon)\
+        /(Split(Overlap(Replicate_frame(np.abs(illum)**2,frames.shape[0])))+frames_epsilon)
+    frames=Illuminate_frames(frames,illum)
     return frames
     
 ####################    
